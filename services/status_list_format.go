@@ -119,14 +119,17 @@ func (f *StatusListFormatter) GenerateJWT(tokenStatusList *models.IssuerStatusLi
 
 // GenerateCWT creates a CWT for the token status list
 func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusList, country, listURL string) (string, error) {
+	// Get certificate paths
+	privKeyPath, certPath := f.config.GetCertificatePaths()
+
 	// Load private key
-	privateKey, err := f.loadPrivateKey(f.config.PrivKeyPath)
+	privateKey, err := f.loadPrivateKey(privKeyPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to load private key: %v", err)
 	}
 
 	// Load certificate
-	cert, err := f.loadCertificate(f.config.CertPath)
+	cert, err := f.loadCertificate(certPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to load certificate: %v", err)
 	}
