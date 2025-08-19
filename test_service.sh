@@ -162,7 +162,7 @@ echo
 echo "🔐 Test 7: Testing CWT format support..."
 if [[ -n "$STATUS_URI" ]]; then
     # Extract path from STATUS_URI for direct endpoint testing
-    URI_PATH=$(echo "$STATUS_URI" | sed 's|http://[^/]*||')
+    URI_PATH=$(echo "$STATUS_URI" | sed 's|https\?://[^/]*||')
     
     # Test 7a: Request JWT format (default)
     echo "  7a: Testing JWT format (application/statuslist+jwt)..."
