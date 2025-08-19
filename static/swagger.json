@@ -1,0 +1,257 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Status List API",
+    "version": "1.0.0",
+    "contact": {}
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080/"
+    }
+  ],
+  "paths": {
+    "/token_status_list/get": {
+      "get": {
+        "summary": "Retrieve Token Status",
+        "operationId": "getTokenStatusList",
+        "description": "Retrieves the status of a token from the revocation list. WARNING: This endpoint is for debug and testing purposes only. Only one of 'id' or 'idx' must be provided.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "id",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifier of the token. Use 'id' for the identifier list."
+          },
+          {
+            "in": "query",
+            "name": "idx",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Index of the status list. Use 'idx' for the status list."
+          },
+          {
+            "in": "query",
+            "name": "uri",
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "URL-encoded URI parameter.",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response containing token status information.",
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/token_status_list/set": {
+      "post": {
+        "summary": "Set Token Status",
+        "operationId": "setTokenStatus",
+        "description": "Sets or updates the status of a token in the revocation list. Only one of 'id' or 'idx' must be provided.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "API key for authentication."
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "oneOf": [
+                  { "required": ["id"] },
+                  { "required": ["idx"] }
+                ],
+                "properties": {
+                  "id": { "type": "string", "description": "Identifier of the token. Use 'id' for the identifier list." },
+                  "idx": { "type": "integer", "description": "Index of the status list. Use 'idx' for the status list." },
+                  "status": { "type": "integer", "description": "The new status value for the token." },
+                  "uri": { "type": "string", "description": "URI associated with the token status." }
+                },
+                "required": ["status", "uri"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response indicating the token status has been updated.",
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/token_status_list/take": {
+      "post": {
+        "summary": "Take Index",
+        "operationId": "takeIndex",
+        "description": "Takes a new index from the status list for a given document type and country.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "API key for authentication."
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "doctype": { 
+                    "type": "string", 
+                    "description": "Document type identifier.",
+                    "enum": [
+                      "eu.europa.ec.eudi.cor.1",
+                      "eu.europa.ec.eudi.ehic.1",
+                      "eu.europa.ec.eudi.hiid.1",
+                      "eu.europa.ec.eudi.iban.1",
+                      "eu.europa.ec.eudi.loyalty.1",
+                      "eu.europa.ec.eudi.msisdn.1",
+                      "eu.europa.ec.eudi.pda1.1",
+                      "eu.europa.ec.eudi.pid.1",
+                      "eu.europa.ec.eudi.por.1",
+                      "eu.europa.ec.eudi.pseudonym.age_over_18.1",
+                      "eu.europa.ec.eudi.pseudonym.age_over_18.deferred_endpoint",
+                      "eu.europa.ec.eudi.tax.1",
+                      "org.iso.18013.5.1.mDL",
+                      "org.iso.18013.5.1.reservation",
+                      "org.iso.23220.2.photoid.1",
+                      "org.iso.23220.photoID.1",
+                      "urn:eudi:pid:1",
+                      "urn:eu.europa.ec.eudi:pid:1",
+                      "eu.europa.ec.av.1"
+                    ]
+                  },
+                  "country": { 
+                    "type": "string", 
+                    "description": "Country code.",
+                    "enum": ["FC", "PT", "EE", "CZ", "NL", "LU", "EU", "AV"]
+                  },
+                  "expiry_date": { 
+                    "type": "string", 
+                    "format": "date",
+                    "description": "Expiry date in YYYY-MM-DD format." 
+                  }
+                },
+                "required": ["doctype", "country", "expiry_date"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response containing status list information.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status_list": {
+                      "type": "object",
+                      "properties": {
+                        "uri": { "type": "string", "format": "uri" },
+                        "idx": { "type": "integer" }
+                      }
+                    },
+                    "identifier_list": {
+                      "type": "object",
+                      "properties": {
+                        "uri": { "type": "string", "format": "uri" },
+                        "id": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/token_status_list/{country}/{doctype}/{id}": {
+      "get": {
+        "summary": "Get Status List JWT (RFC endpoint)",
+        "description": "Serves the status list JWT for a given country, document type, and list id (RFC draft-ietf-oauth-status-list-02 compliant endpoint).",
+        "operationId": "getStatusListJWT",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Country code."
+          },
+          {
+            "name": "doctype",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Document type identifier."
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Status list unique id (random)."
+          },
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": false,
+            "schema": { 
+              "type": "string", 
+              "enum": ["application/statuslist+jwt", "application/statuslist+cwt"],
+              "default": "application/statuslist+jwt"
+            },
+            "description": "Media type. Supports both JWT and CWT formats."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status list JWT or CWT file.",
+            "content": {
+              "application/statuslist+jwt": {
+                "schema": { "type": "string", "format": "binary" }
+              },
+              "application/statuslist+cwt": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "404": {
+            "description": "Status list not found."
+          },
+          "406": {
+            "description": "Not Acceptable. Only application/statuslist+jwt and application/statuslist+cwt are supported."
+          }
+        }
+      }
+    }
+  }
+}

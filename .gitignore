@@ -1,0 +1,4 @@
+*.exe
+temp/
+*.log
+RCA.md

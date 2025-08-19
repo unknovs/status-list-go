@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  statuslist-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      # Basic configuration
+      API_KEY: "local-dev-key"
+      SERVICE_URL: "http://localhost:8080/"
+      COUNTRY_CODE: "LV"
+
+      # Directory paths (using container paths)
+      STATUS_LIST_DIR: "/var/opt/status_lists"
+      BACKUP_DIR: "/var/opt/status_list_backup"
+      LOG_DIR: "/tmp/status_lists"
+
+      # Certificate paths (mounted from host)
+      PRIVATE_KEY_PATH: "/app/certs/private_key/decrypted_key.pem"
+      CERTIFICATE_PATH: "/app/certs/certificate/PID-DS-0002.cert.der"
+      
+      # Allowed doctypes (comma-separated, optional - will use defaults if not set)
+      ALLOWED_DOCTYPES: "eu.europa.ec.eudi.pid.1,org.iso.18013.5.1.mDL,custom.doctype.1"
+    volumes:
+      # Mount certificate directory from host (use secrets for production)
+      - ./temp:/app/certs
+      
+      # Persistent volumes for data
+      - status_lists_data:/var/opt/status_lists
+      - backup_data:/var/opt/status_list_backup
+      - log_data:/tmp/status_lists
+
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/server", "--health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  status_lists_data:
+    driver: local
+  backup_data:
+    driver: local
+  log_data:
+    driver: local

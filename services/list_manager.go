@@ -1,0 +1,338 @@
+/*
+Copyright (c) Gatis Beikerts
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package services
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/unknovs/status-list-go/config"
+	"github.com/unknovs/status-list-go/models"
+
+	"github.com/google/uuid"
+)
+
+// ListManager manages status lists and identifier lists
+type ListManager struct {
+	config     *config.Config
+	statusList map[string]map[string]*models.StatusListData
+	mutex      sync.RWMutex
+}
+
+// NewListManager creates a new list manager
+func NewListManager(cfg *config.Config) *ListManager {
+	return &ListManager{
+		config:     cfg,
+		statusList: make(map[string]map[string]*models.StatusListData),
+	}
+}
+
+// NewList initializes a new status list for a country and doctype
+func (lm *ListManager) NewList(country, doctype string) {
+	lm.mutex.Lock()
+	defer lm.mutex.Unlock()
+
+	if lm.statusList[country] == nil {
+		lm.statusList[country] = make(map[string]*models.StatusListData)
+	}
+
+	identifierList := make(map[string]int)
+
+	lm.statusList[country][doctype] = &models.StatusListData{
+		TokenStatusList: models.NewIssuerStatusList(1, lm.config.TokenStatusListSize, "random"),
+		IdentifierList:  identifierList,
+		Expires:         nil,
+		Rand:            uuid.New().String(),
+	}
+}
+
+// DumpList saves the status list to disk
+func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, doctype string) error {
+	rand := statusListData.Rand
+
+	// Create directories
+	tokenDir := filepath.Join(lm.config.StatusListDir, "token_status_list", country, doctype, rand)
+	identifierDir := filepath.Join(lm.config.StatusListDir, "identifier_list", country, doctype, rand)
+
+	if err := os.MkdirAll(tokenDir, 0755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(identifierDir, 0755); err != nil {
+		return err
+	}
+
+	// Copy data and set metadata
+	statusListCopy := *statusListData
+	statusListCopy.Country = country
+	statusListCopy.Doctype = doctype
+
+	// Save full list JSON
+	jsonData, err := json.Marshal(statusListCopy)
+	if err != nil {
+		return err
+	}
+
+	jsonFilePath := filepath.Join(tokenDir, "full_list.json")
+	if err := os.WriteFile(jsonFilePath, jsonData, 0644); err != nil {
+		return err
+	}
+
+	// Save identifier list JSON
+	identifierJSONPath := filepath.Join(identifierDir, "full_list.json")
+	if err := os.WriteFile(identifierJSONPath, jsonData, 0644); err != nil {
+		return err
+	}
+
+	// Generate JWT and CWT files
+	statusListURI := lm.config.ServiceURL + fmt.Sprintf("token_status_list/%s/%s/%s", country, doctype, rand)
+	identifierListURI := lm.config.ServiceURL + fmt.Sprintf("identifier_list/%s/%s/%s", country, doctype, rand)
+
+	// Generate token status list JWT
+	jwtContent, err := lm.generateJWTFormat(statusListData.TokenStatusList, country, statusListURI)
+	if err != nil {
+		log.Printf("Failed to generate JWT: %v", err)
+	} else {
+		jwtFilePath := filepath.Join(tokenDir, "token_status_list.jwt")
+		if err := os.WriteFile(jwtFilePath, []byte(jwtContent), 0644); err != nil {
+			return err
+		}
+	}
+
+	// Generate token status list CWT
+	cwtContent, err := lm.generateCWTFormat(statusListData.TokenStatusList, country, statusListURI)
+	if err != nil {
+		log.Printf("Failed to generate CWT: %v", err)
+	} else {
+		cwtFilePath := filepath.Join(tokenDir, "token_status_list.cwt")
+		if err := os.WriteFile(cwtFilePath, []byte(cwtContent), 0644); err != nil {
+			return err
+		}
+	}
+
+	// Generate identifier list JWT
+	identifierJWTContent, err := lm.generateIdentifierJWTFormat(statusListData.IdentifierList, country, identifierListURI)
+	if err != nil {
+		log.Printf("Failed to generate identifier JWT: %v", err)
+	} else {
+		identifierJWTPath := filepath.Join(identifierDir, "identifier_list.jwt")
+		if err := os.WriteFile(identifierJWTPath, []byte(identifierJWTContent), 0644); err != nil {
+			return err
+		}
+	}
+
+	// Generate identifier list CWT
+	identifierCWTContent, err := lm.generateIdentifierCWTFormat(statusListData.IdentifierList, country, identifierListURI)
+	if err != nil {
+		log.Printf("Failed to generate identifier CWT: %v", err)
+	} else {
+		identifierCWTPath := filepath.Join(identifierDir, "identifier_list.cwt")
+		if err := os.WriteFile(identifierCWTPath, []byte(identifierCWTContent), 0644); err != nil {
+			return err
+		}
+	}
+
+	// Update URIs in the status list data
+	statusListData.StatusListURI = statusListURI
+	statusListData.IdentifierListURI = identifierListURI
+
+	return nil
+}
+
+// LoadList loads a status list from disk
+func (lm *ListManager) LoadList(uri string) (*models.StatusListData, error) {
+	parsedURI, err := url.Parse(uri)
+	if err != nil {
+		return nil, err
+	}
+
+	folderPath := filepath.Join(lm.config.StatusListDir, parsedURI.Path, "full_list.json")
+
+	jsonData, err := os.ReadFile(folderPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var statusListData models.StatusListData
+	if err := json.Unmarshal(jsonData, &statusListData); err != nil {
+		return nil, err
+	}
+
+	return &statusListData, nil
+}
+
+// TakeIndexList takes a new index from the list
+func (lm *ListManager) TakeIndexList(country, doctype, expiryDate string) (int, error) {
+	lm.mutex.Lock()
+	defer lm.mutex.Unlock()
+
+	if lm.statusList[country] == nil {
+		lm.statusList[country] = make(map[string]*models.StatusListData)
+	}
+
+	if lm.statusList[country][doctype] == nil {
+		identifierList := make(map[string]int)
+		lm.statusList[country][doctype] = &models.StatusListData{
+			TokenStatusList: models.NewIssuerStatusList(1, lm.config.TokenStatusListSize, "random"),
+			IdentifierList:  identifierList,
+			Expires:         &expiryDate,
+			Rand:            uuid.New().String(),
+		}
+	}
+
+	statusListData := lm.statusList[country][doctype]
+
+	// Take index from allocator
+	index, err := statusListData.TokenStatusList.Allocator.Take()
+	if err != nil {
+		// No more indices, create new list
+		if err := lm.DumpList(statusListData, country, doctype); err != nil {
+			return 0, err
+		}
+
+		// Reset and create new list
+		delete(lm.statusList[country], doctype)
+		return lm.TakeIndexList(country, doctype, expiryDate)
+	}
+
+	// Update expiry date to the latest one
+	if statusListData.Expires == nil {
+		statusListData.Expires = &expiryDate
+	} else {
+		currentExp, _ := time.Parse("2006-01-02", *statusListData.Expires)
+		newExp, _ := time.Parse("2006-01-02", expiryDate)
+		if newExp.After(currentExp) {
+			statusListData.Expires = &expiryDate
+		}
+	}
+
+	log.Printf("Status List Expiry Changed to: %s", *statusListData.Expires)
+
+	// Dump the updated list
+	if err := lm.DumpList(statusListData, country, doctype); err != nil {
+		return 0, err
+	}
+
+	return index, nil
+}
+
+// GenerateStatusListInfo generates the structure sent to the issuer
+func (lm *ListManager) GenerateStatusListInfo(country, doctype, expiryDate string) (*models.StatusListInfo, error) {
+	// Ensure list exists
+	lm.mutex.RLock()
+	if lm.statusList[country] == nil || lm.statusList[country][doctype] == nil {
+		lm.mutex.RUnlock()
+		lm.NewList(country, doctype)
+	} else {
+		lm.mutex.RUnlock()
+	}
+
+	index, err := lm.TakeIndexList(country, doctype, expiryDate)
+	if err != nil {
+		return nil, err
+	}
+
+	lm.mutex.RLock()
+	statusListData := lm.statusList[country][doctype]
+	statusListURI := statusListData.StatusListURI
+	identifierListURI := statusListData.IdentifierListURI
+	lm.mutex.RUnlock()
+
+	statusListInfo := &models.StatusListInfo{}
+	statusListInfo.StatusList.URI = statusListURI
+	statusListInfo.StatusList.Idx = index
+	statusListInfo.IdentifierList.URI = identifierListURI
+	statusListInfo.IdentifierList.ID = fmt.Sprintf("%d", index)
+
+	return statusListInfo, nil
+}
+
+// GetStatusFromURI gets status from a URI and index
+func (lm *ListManager) GetStatusFromURI(uri string, index int) (int, error) {
+	tempList, err := lm.LoadList(uri)
+	if err != nil {
+		return 0, err
+	}
+
+	if strings.Contains(uri, "token_status_list") {
+		return tempList.TokenStatusList.StatusList.Get(index), nil
+	} else if strings.Contains(uri, "identifier_list") {
+		if status, exists := tempList.IdentifierList[fmt.Sprintf("%d", index)]; exists {
+			return status, nil
+		}
+		return 0, nil
+	}
+
+	return 0, fmt.Errorf("unknown URI type")
+}
+
+// SetStatus updates the status at a given index
+func (lm *ListManager) SetStatus(uri, country, doctype, listID string, index, status int) error {
+	tempList, err := lm.LoadList(uri)
+	if err != nil {
+		return err
+	}
+
+	// Update the status
+	tempList.TokenStatusList.StatusList.Set(index, status)
+	tempList.IdentifierList[fmt.Sprintf("%d", index)] = status
+
+	// Update the in-memory status list if it matches
+	lm.mutex.Lock()
+	if lm.statusList[country] != nil && lm.statusList[country][doctype] != nil &&
+		lm.statusList[country][doctype].Rand == listID {
+		lm.statusList[country][doctype].TokenStatusList.StatusList.Set(index, status)
+		if lm.statusList[country][doctype].IdentifierList == nil {
+			lm.statusList[country][doctype].IdentifierList = make(map[string]int)
+		}
+		lm.statusList[country][doctype].IdentifierList[fmt.Sprintf("%d", index)] = status
+	}
+	lm.mutex.Unlock()
+
+	// Save the updated list
+	return lm.DumpList(tempList, country, doctype)
+}
+
+// generateJWTFormat generates JWT format
+func (lm *ListManager) generateJWTFormat(tokenStatusList *models.IssuerStatusList, country, listURL string) (string, error) {
+	formatter := NewStatusListFormatter(lm.config)
+	return formatter.GenerateJWT(tokenStatusList, country, listURL)
+}
+
+// generateCWTFormat generates CWT format
+func (lm *ListManager) generateCWTFormat(tokenStatusList *models.IssuerStatusList, country, listURL string) (string, error) {
+	formatter := NewStatusListFormatter(lm.config)
+	return formatter.GenerateCWT(tokenStatusList, country, listURL)
+}
+
+// generateIdentifierJWTFormat generates identifier JWT format
+func (lm *ListManager) generateIdentifierJWTFormat(identifierList map[string]int, country, listURL string) (string, error) {
+	formatter := NewStatusListFormatter(lm.config)
+	return formatter.GenerateIdentifierJWT(identifierList, country, listURL)
+}
+
+// generateIdentifierCWTFormat generates identifier CWT format
+func (lm *ListManager) generateIdentifierCWTFormat(identifierList map[string]int, country, listURL string) (string, error) {
+	formatter := NewStatusListFormatter(lm.config)
+	return formatter.GenerateIdentifierCWT(identifierList, country, listURL)
+}
