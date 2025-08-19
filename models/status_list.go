@@ -17,10 +17,13 @@ limitations under the License.
 package models
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/big"
 )
 
@@ -111,7 +114,22 @@ func (sl *StatusList) Set(index, value int) {
 
 // Compressed returns the gzip-compressed data
 func (sl *StatusList) Compressed() []byte {
-	return sl.data // For simplicity, returning raw data. In production, use gzip compression
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+
+	logFallback := func(stage string, err error) []byte {
+		log.Printf("Warning: StatusList compression failed during %s: %v, falling back to raw data", stage, err)
+		return sl.data
+	}
+
+	_, err := gz.Write(sl.data)
+	if err != nil {
+		return logFallback("write", err)
+	}
+	if err := gz.Close(); err != nil {
+		return logFallback("close", err)
+	}
+	return buf.Bytes()
 }
 
 // NewAllocator creates a new allocator
