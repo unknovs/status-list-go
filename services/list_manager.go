@@ -94,13 +94,13 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 	}
 
 	jsonFilePath := filepath.Join(tokenDir, "full_list.json")
-	if err := os.WriteFile(jsonFilePath, jsonData, 0644); err != nil {
+	if err := os.WriteFile(jsonFilePath, jsonData, 0640); err != nil {
 		return err
 	}
 
 	// Save identifier list JSON
 	identifierJSONPath := filepath.Join(identifierDir, "full_list.json")
-	if err := os.WriteFile(identifierJSONPath, jsonData, 0644); err != nil {
+	if err := os.WriteFile(identifierJSONPath, jsonData, 0640); err != nil {
 		return err
 	}
 
@@ -114,7 +114,7 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 		log.Printf("Failed to generate JWT: %v", err)
 	} else {
 		jwtFilePath := filepath.Join(tokenDir, "token_status_list.jwt")
-		if err := os.WriteFile(jwtFilePath, []byte(jwtContent), 0644); err != nil {
+		if err := os.WriteFile(jwtFilePath, []byte(jwtContent), 0600); err != nil {
 			return err
 		}
 	}
@@ -125,7 +125,7 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 		log.Printf("Failed to generate CWT: %v", err)
 	} else {
 		cwtFilePath := filepath.Join(tokenDir, "token_status_list.cwt")
-		if err := os.WriteFile(cwtFilePath, []byte(cwtContent), 0644); err != nil {
+		if err := os.WriteFile(cwtFilePath, []byte(cwtContent), 0600); err != nil {
 			return err
 		}
 	}
@@ -136,7 +136,7 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 		log.Printf("Failed to generate identifier JWT: %v", err)
 	} else {
 		identifierJWTPath := filepath.Join(identifierDir, "identifier_list.jwt")
-		if err := os.WriteFile(identifierJWTPath, []byte(identifierJWTContent), 0644); err != nil {
+		if err := os.WriteFile(identifierJWTPath, []byte(identifierJWTContent), 0600); err != nil {
 			return err
 		}
 	}
@@ -147,7 +147,7 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 		log.Printf("Failed to generate identifier CWT: %v", err)
 	} else {
 		identifierCWTPath := filepath.Join(identifierDir, "identifier_list.cwt")
-		if err := os.WriteFile(identifierCWTPath, []byte(identifierCWTContent), 0644); err != nil {
+		if err := os.WriteFile(identifierCWTPath, []byte(identifierCWTContent), 0600); err != nil {
 			return err
 		}
 	}

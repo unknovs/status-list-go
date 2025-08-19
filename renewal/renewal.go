@@ -144,7 +144,7 @@ func (rs *RenewalService) renewTokenStatusList(dirPath, copyDir string, statusLi
 		log.Printf("Failed to generate JWT for %s: %v", dirPath, err)
 	} else {
 		jwtFilePath := filepath.Join(dirPath, "token_status_list.jwt")
-		if err := os.WriteFile(jwtFilePath, []byte(jwtContent), 0644); err != nil {
+		if err := os.WriteFile(jwtFilePath, []byte(jwtContent), 0600); err != nil {
 			log.Printf("Failed to write JWT file %s: %v", jwtFilePath, err)
 		}
 	}
@@ -155,7 +155,7 @@ func (rs *RenewalService) renewTokenStatusList(dirPath, copyDir string, statusLi
 		log.Printf("Failed to generate CWT for %s: %v", dirPath, err)
 	} else {
 		cwtFilePath := filepath.Join(dirPath, "token_status_list.cwt")
-		if err := os.WriteFile(cwtFilePath, []byte(cwtContent), 0644); err != nil {
+		if err := os.WriteFile(cwtFilePath, []byte(cwtContent), 0600); err != nil {
 			log.Printf("Failed to write CWT file %s: %v", cwtFilePath, err)
 		}
 	}
@@ -176,7 +176,7 @@ func (rs *RenewalService) renewIdentifierList(dirPath, copyDir string, statusLis
 		log.Printf("Failed to generate identifier JWT for %s: %v", dirPath, err)
 	} else {
 		jwtFilePath := filepath.Join(dirPath, "identifier_list.jwt")
-		if err := os.WriteFile(jwtFilePath, []byte(jwtContent), 0644); err != nil {
+		if err := os.WriteFile(jwtFilePath, []byte(jwtContent), 0600); err != nil {
 			log.Printf("Failed to write identifier JWT file %s: %v", jwtFilePath, err)
 		}
 	}
@@ -187,7 +187,7 @@ func (rs *RenewalService) renewIdentifierList(dirPath, copyDir string, statusLis
 		log.Printf("Failed to generate identifier CWT for %s: %v", dirPath, err)
 	} else {
 		cwtFilePath := filepath.Join(dirPath, "identifier_list.cwt")
-		if err := os.WriteFile(cwtFilePath, []byte(cwtContent), 0644); err != nil {
+		if err := os.WriteFile(cwtFilePath, []byte(cwtContent), 0600); err != nil {
 			log.Printf("Failed to write identifier CWT file %s: %v", cwtFilePath, err)
 		}
 	}
@@ -195,13 +195,20 @@ func (rs *RenewalService) renewIdentifierList(dirPath, copyDir string, statusLis
 	return nil
 }
 
-// copyFile copies a file from src to dst
+// copyFile copies a file from src to dst, preserving the source file's permissions
 func (rs *RenewalService) copyFile(src, dst string) error {
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, 0644)
+
+	// Get source file info to preserve permissions
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(dst, data, srcInfo.Mode())
 }
 
 // dailyRenewal runs the renewal process daily at midnight
