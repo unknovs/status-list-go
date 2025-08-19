@@ -106,13 +106,8 @@ func (a *App) setupRoutes() {
 
 		if !found {
 			// If still not found, serve a basic error response
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{
-				"error":       "swagger.json not found",
-				"message":     "Please ensure swagger.json exists in the static directory",
-				"paths_tried": fmt.Sprintf("%v", swaggerPaths),
-			})
+			handlers.WriteCustomError(w, http.StatusNotFound, handlers.ErrListNotFound,
+				fmt.Sprintf("swagger.json not found. Please ensure swagger.json exists in the static directory. Paths tried: %v", swaggerPaths))
 			return
 		}
 

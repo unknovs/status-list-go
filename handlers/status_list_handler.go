@@ -60,13 +60,13 @@ func NewStatusListHandler(cfg *config.Config) *StatusListHandler {
 // @Router /token_status_list/take [post]
 func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		WriteError(w, http.StatusMethodNotAllowed, ErrBadRequest)
 		return
 	}
 
 	// Parse form data
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, ErrParseForm)
 		return
 	}
 
@@ -138,7 +138,7 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 // @Router /token_status_list/get [get]
 func (h *StatusListHandler) GetIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		WriteError(w, http.StatusMethodNotAllowed, ErrBadRequest)
 		return
 	}
 
@@ -200,13 +200,13 @@ func (h *StatusListHandler) GetIndex(w http.ResponseWriter, r *http.Request) {
 // @Router /token_status_list/set [post]
 func (h *StatusListHandler) SetIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		WriteError(w, http.StatusMethodNotAllowed, ErrBadRequest)
 		return
 	}
 
 	// Parse form data
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, ErrParseForm)
 		return
 	}
 
