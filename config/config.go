@@ -113,25 +113,12 @@ func getAllowedDoctypes() map[string]bool {
 
 	// Default hardcoded doctypes if environment variable is not set
 	return map[string]bool{
-		"eu.europa.ec.eudi.cor.1":                                   true,
-		"eu.europa.ec.eudi.ehic.1":                                  true,
-		"eu.europa.ec.eudi.hiid.1":                                  true,
-		"eu.europa.ec.eudi.iban.1":                                  true,
-		"eu.europa.ec.eudi.loyalty.1":                               true,
-		"eu.europa.ec.eudi.msisdn.1":                                true,
-		"eu.europa.ec.eudi.pda1.1":                                  true,
-		"eu.europa.ec.eudi.pid.1":                                   true,
-		"eu.europa.ec.eudi.por.1":                                   true,
-		"eu.europa.ec.eudi.pseudonym.age_over_18.1":                 true,
-		"eu.europa.ec.eudi.pseudonym.age_over_18.deferred_endpoint": true,
-		"eu.europa.ec.eudi.tax.1":                                   true,
-		"org.iso.18013.5.1.mDL":                                     true,
-		"org.iso.18013.5.1.reservation":                             true,
-		"org.iso.23220.2.photoid.1":                                 true,
-		"org.iso.23220.photoID.1":                                   true,
-		"urn:eudi:pid:1":                                            true,
-		"urn:eu.europa.ec.eudi:pid:1":                               true,
-		"eu.europa.ec.av.1":                                         true,
+		"eu.europa.ec.eudi.ehic.1":    true,
+		"eu.europa.ec.eudi.hiid.1":    true,
+		"eu.europa.ec.eudi.pid.1":     true,
+		"org.iso.18013.5.1.mDL":       true,
+		"urn:eudi:pid:1":              true,
+		"urn:eu.europa.ec.eudi:pid:1": true,
 	}
 }
 
