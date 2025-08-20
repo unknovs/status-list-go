@@ -18,7 +18,7 @@ package models
 
 import (
 	"bytes"
-	"compress/gzip"
+	"compress/zlib"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -112,21 +112,22 @@ func (sl *StatusList) Set(index, value int) {
 	}
 }
 
-// Compressed returns the gzip-compressed data
+// Compressed returns the ZLIB-compressed data using DEFLATE algorithm
+// as required by RFC draft-ietf-oauth-status-list-02 Section 4
 func (sl *StatusList) Compressed() []byte {
 	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
+	zw := zlib.NewWriter(&buf)
 
 	logFallback := func(stage string, err error) []byte {
 		log.Printf("Warning: StatusList compression failed during %s: %v, falling back to raw data", stage, err)
 		return sl.data
 	}
 
-	_, err := gz.Write(sl.data)
+	_, err := zw.Write(sl.data)
 	if err != nil {
 		return logFallback("write", err)
 	}
-	if err := gz.Close(); err != nil {
+	if err := zw.Close(); err != nil {
 		return logFallback("close", err)
 	}
 	return buf.Bytes()
