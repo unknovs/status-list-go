@@ -172,7 +172,7 @@ func (a *Allocator) Take() (int, error) {
 	return index, nil
 }
 
-// NewIssuerStatusList creates a new issuer status list
+// Creates a new issuer status list
 func NewIssuerStatusList(bits, size int, strategy string) *IssuerStatusList {
 	return &IssuerStatusList{
 		StatusList: NewStatusList(size),
