@@ -255,7 +255,7 @@ func TestSwaggerUIEndpoint(t *testing.T) {
 	// Check that the HTML contains expected elements
 	expectedElements := []string{
 		"<!DOCTYPE html>",
-		"<title>Revocation API</title>",
+		"<title>Status List API</title>",
 		"swagger-ui-dist",
 		"SwaggerUIBundle",
 		cfg.ServiceURL + "token_status_list/swagger/swagger.json",

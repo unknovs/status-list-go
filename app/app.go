@@ -122,7 +122,7 @@ func (a *App) setupRoutes() {
 		swaggerHTML := `<!DOCTYPE html>
 <html>
 <head>
-    <title>Revocation API</title>
+    <title>Status List API</title>
     <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@3.25.0/swagger-ui.css" />
 </head>
 <body>
@@ -130,7 +130,7 @@ func (a *App) setupRoutes() {
     <script src="https://unpkg.com/swagger-ui-dist@3.25.0/swagger-ui-bundle.js"></script>
     <script>
         SwaggerUIBundle({
-            url: '` + a.config.ServiceURL + `token_status_list/swagger/swagger.json',
+            url: './swagger.json',
             dom_id: '#swagger-ui',
             presets: [
                 SwaggerUIBundle.presets.apis,
