@@ -234,7 +234,7 @@ echo
 # Test 8: Content-Type header verification
 echo "📋 Test 8: Testing Content-Type headers..."
 if [[ -n "$STATUS_URI" ]]; then
-    URI_PATH=$(echo "$STATUS_URI" | sed 's|http://[^/]*||')
+    URI_PATH=$(echo "$STATUS_URI" | sed 's|https\?://[^/]*||')
     
     # Test JWT Content-Type
     JWT_HEADERS=$(curl -s -v -H "Accept: application/statuslist+jwt" "$BASE_URL$URI_PATH" 2>&1 | grep -i "content-type")
