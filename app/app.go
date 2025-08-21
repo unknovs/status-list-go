@@ -111,11 +111,80 @@ func (a *App) setupRoutes() {
 			return
 		}
 
+		// Read the original swagger.json
+		swaggerData, err := os.ReadFile(swaggerPath)
+		if err != nil {
+			handlers.WriteCustomError(w, http.StatusInternalServerError, handlers.ErrListNotFound,
+				fmt.Sprintf("Failed to read swagger.json: %v", err))
+			return
+		}
+
+		// Parse the JSON to modify it dynamically
+		var swaggerDoc map[string]interface{}
+		if err := json.Unmarshal(swaggerData, &swaggerDoc); err != nil {
+			handlers.WriteCustomError(w, http.StatusInternalServerError, handlers.ErrListNotFound,
+				fmt.Sprintf("Failed to parse swagger.json: %v", err))
+			return
+		}
+
+		// Build server URLs dynamically
+		var servers []map[string]interface{}
+
+		if a.config.SwaggerURLPrefix != "" {
+			// Use ServiceURL + SwaggerURLPrefix if service is behind proxy and stripprefix is used
+			baseURL := strings.TrimSuffix(a.config.ServiceURL, "/")
+			prefix := a.config.SwaggerURLPrefix
+			if !strings.HasPrefix(prefix, "/") {
+				prefix = "/" + prefix
+			}
+			servers = append(servers, map[string]interface{}{
+				"url": baseURL + prefix + "/",
+			})
+		} else {
+			// Use ServiceURL as base and try to auto-detect from request headers
+			servers = append(servers, map[string]interface{}{
+				"url": a.config.ServiceURL,
+			})
+
+			// Also try to detect if we're behind a proxy with prefix
+			if r.Header.Get("X-Forwarded-Prefix") != "" {
+				scheme := "http"
+				if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+					scheme = "https"
+				}
+
+				host := r.Host
+				if forwarded := r.Header.Get("X-Forwarded-Host"); forwarded != "" {
+					host = forwarded
+				}
+
+				pathPrefix := r.Header.Get("X-Forwarded-Prefix")
+				pathPrefix = strings.TrimSuffix(pathPrefix, "/")
+				if !strings.HasPrefix(pathPrefix, "/") {
+					pathPrefix = "/" + pathPrefix
+				}
+				servers = append(servers, map[string]interface{}{
+					"url": fmt.Sprintf("%s://%s%s/", scheme, host, pathPrefix),
+				})
+			}
+		}
+
+		swaggerDoc["servers"] = servers
+
+		// Serialize back to JSON
+		modifiedSwagger, err := json.Marshal(swaggerDoc)
+		if err != nil {
+			handlers.WriteCustomError(w, http.StatusInternalServerError, handlers.ErrListNotFound,
+				fmt.Sprintf("Failed to serialize modified swagger.json: %v", err))
+			return
+		}
+
 		// Add cache-busting headers to ensure swagger UI gets updates
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Expires", "0")
-		http.ServeFile(w, r, swaggerPath)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(modifiedSwagger)
 	})
 
 	a.mux.HandleFunc("/token_status_list/swagger", func(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +199,7 @@ func (a *App) setupRoutes() {
     <script src="https://unpkg.com/swagger-ui-dist@3.25.0/swagger-ui-bundle.js"></script>
     <script>
         SwaggerUIBundle({
-            url: './swagger.json',
+            url: './swagger/swagger.json',
             dom_id: '#swagger-ui',
             presets: [
                 SwaggerUIBundle.presets.apis,

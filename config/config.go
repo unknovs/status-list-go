@@ -26,6 +26,7 @@ import (
 type Config struct {
 	APIKey              string
 	ServiceURL          string
+	SwaggerURLPrefix    string
 	TokenStatusListSize int
 	StatusListDir       string
 	BackupDir           string
@@ -46,6 +47,7 @@ func Load() (*Config, error) {
 	config := &Config{
 		APIKey:              getEnv("API_KEY", "test"),
 		ServiceURL:          getEnv("SERVICE_URL", "http://localhost:8080/"),
+		SwaggerURLPrefix:    getEnv("SWAGGER_URL_PREFIX", ""), // Empty means use ServiceURL as base, e.g., "/api"
 		TokenStatusListSize: 10000,
 		StatusListDir:       getEnv("STATUS_LIST_DIR", "/var/opt/status_lists"),
 		BackupDir:           getEnv("BACKUP_DIR", "/var/opt/status_list_backup"),

@@ -5,11 +5,7 @@
     "version": "1.0.0",
     "contact": {}
   },
-  "servers": [
-    {
-      "url": "http://localhost:8080/"
-    }
-  ],
+  "servers": [],
   "paths": {
     "/token_status_list/get": {
       "get": {
