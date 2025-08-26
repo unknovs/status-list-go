@@ -238,10 +238,16 @@ func (a *App) corsMiddleware(next http.Handler) http.Handler {
 
 // Run starts the application server
 func (a *App) Run() error {
-	fmt.Println("Starting Status List Service on :8080")
+	// Get port from environment variable, default to 8080
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	fmt.Printf("Starting Status List Service on :%s\n", port)
 
 	// Wrap the mux with CORS middleware
 	handler := a.corsMiddleware(a.mux)
 
-	return http.ListenAndServe(":8080", handler)
+	return http.ListenAndServe(":"+port, handler)
 }
