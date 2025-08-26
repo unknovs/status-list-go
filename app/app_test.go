@@ -224,8 +224,43 @@ func TestSwaggerJSONEndpoint(t *testing.T) {
 
 		// Check content
 		body := strings.TrimSpace(rr.Body.String())
-		if body != swaggerContent {
-			t.Errorf("Expected swagger content %s, got %s", swaggerContent, body)
+
+		// The swagger endpoint dynamically adds servers, so we need to parse and check structure
+		var actualSwagger map[string]interface{}
+		err = json.Unmarshal([]byte(body), &actualSwagger)
+		if err != nil {
+			t.Errorf("Failed to parse returned swagger JSON: %v", err)
+		}
+
+		// Check that basic structure is preserved
+		expectedSwagger := map[string]interface{}{
+			"swagger": "2.0",
+			"info": map[string]interface{}{
+				"title":   "Test API",
+				"version": "1.0",
+			},
+		}
+
+		if actualSwagger["swagger"] != expectedSwagger["swagger"] {
+			t.Errorf("Expected swagger version %v, got %v", expectedSwagger["swagger"], actualSwagger["swagger"])
+		}
+
+		actualInfo, ok := actualSwagger["info"].(map[string]interface{})
+		if !ok {
+			t.Errorf("Expected info to be a map, got %T", actualSwagger["info"])
+		} else {
+			expectedInfo := expectedSwagger["info"].(map[string]interface{})
+			if actualInfo["title"] != expectedInfo["title"] {
+				t.Errorf("Expected info.title %v, got %v", expectedInfo["title"], actualInfo["title"])
+			}
+			if actualInfo["version"] != expectedInfo["version"] {
+				t.Errorf("Expected info.version %v, got %v", expectedInfo["version"], actualInfo["version"])
+			}
+		}
+
+		// Check that servers field was added
+		if _, exists := actualSwagger["servers"]; !exists {
+			t.Errorf("Expected servers field to be added to swagger JSON")
 		}
 	})
 }
@@ -258,7 +293,7 @@ func TestSwaggerUIEndpoint(t *testing.T) {
 		"<title>Status List API</title>",
 		"swagger-ui-dist",
 		"SwaggerUIBundle",
-		cfg.ServiceURL + "token_status_list/swagger/swagger.json",
+		"./swagger/swagger.json",
 	}
 
 	for _, element := range expectedElements {
