@@ -21,6 +21,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"os"
@@ -134,7 +135,7 @@ func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusLi
 		return "", fmt.Errorf("failed to load certificate: %v", err)
 	}
 
-	// Create CWT claims
+	// Create CWT claims using numeric keys as per RFC 8392
 	now := time.Now()
 
 	// Safely handle ServiceURL
@@ -144,11 +145,12 @@ func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusLi
 	}
 	issuer = strings.TrimSuffix(issuer, "/")
 
-	claims := CWTClaims{
-		Issuer:   issuer,
-		Subject:  listURL,
-		IssuedAt: now.Unix(),
-		StatusList: map[string]interface{}{
+	// Use raw map with integer keys for proper CWT format
+	claims := map[interface{}]interface{}{
+		1: issuer,     // iss (issuer) - RFC 8392 claim 1
+		2: listURL,    // sub (subject) - RFC 8392 claim 2
+		6: now.Unix(), // iat (issued at) - RFC 8392 claim 6
+		65534: map[string]interface{}{ // status_list claim - draft-ietf-oauth-status-list-02
 			"bits": 1,
 			"lst":  base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(tokenStatusList.StatusList.Compressed()),
 		},
@@ -161,10 +163,10 @@ func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusLi
 	}
 
 	// Create COSE Sign1 message
-	// Set up headers
+	// Set up headers with proper structure
 	headers := cose.Headers{
 		Protected: cose.ProtectedHeader{
-			cose.HeaderLabelAlgorithm:   cose.AlgorithmES256, // ECDSA using P-256 and SHA-256
+			cose.HeaderLabelAlgorithm:   cose.AlgorithmES256, // ECDSA using P-256 and SHA-256 (-7)
 			cose.HeaderLabelContentType: "application/statuslist+cwt",
 		},
 		Unprotected: cose.UnprotectedHeader{
@@ -197,8 +199,8 @@ func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusLi
 		return "", fmt.Errorf("failed to encode CWT: %v", err)
 	}
 
-	// Return base64url encoded CWT
-	return base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(cwtData), nil
+	// Return hex encoded CWT to match the expected format
+	return hex.EncodeToString(cwtData), nil
 }
 
 // GenerateIdentifierJWT creates a JWT for the identifier list
@@ -338,8 +340,8 @@ func (f *StatusListFormatter) GenerateIdentifierCWT(identifierList map[string]in
 		return "", fmt.Errorf("failed to encode CWT: %v", err)
 	}
 
-	// Return base64url encoded CWT
-	return base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(cwtData), nil
+	// Return hex encoded CWT to match the expected format
+	return hex.EncodeToString(cwtData), nil
 }
 
 // loadPrivateKey loads a private key from file
