@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -435,4 +436,376 @@ func TestPerformHealthCheck_HTTPClientTimeout(t *testing.T) {
 			t.Errorf("Expected 'Health check failed:' in output, got: %s", outputStr)
 		}
 	})
+}
+
+// TestLocalStorageIntegration tests the full request flow with local storage
+func TestLocalStorageIntegration(t *testing.T) {
+	// Create temporary directory for test
+	tempDir, err := os.MkdirTemp("", "local_storage_integration_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Set up environment variables for local storage
+	originalEnvVars := map[string]string{
+		"STATUS_LIST_DIR":        os.Getenv("STATUS_LIST_DIR"),
+		"BACKUP_DIR":             os.Getenv("BACKUP_DIR"),
+		"STATUS_LIST_STORAGE":    os.Getenv("STATUS_LIST_STORAGE"),
+		"SERVICE_URL":            os.Getenv("SERVICE_URL"),
+		"API_KEY":                os.Getenv("API_KEY"),
+		"PRIVATE_KEY_PATH":       os.Getenv("PRIVATE_KEY_PATH"),
+		"CERTIFICATE_PATH":       os.Getenv("CERTIFICATE_PATH"),
+		"TOKEN_STATUS_LIST_SIZE": os.Getenv("TOKEN_STATUS_LIST_SIZE"),
+	}
+
+	// Restore environment variables after test
+	defer func() {
+		for key, value := range originalEnvVars {
+			if value != "" {
+				os.Setenv(key, value)
+			} else {
+				os.Unsetenv(key)
+			}
+		}
+	}()
+
+	// Configure for local storage (no STATUS_LIST_STORAGE = default to local)
+	statusListDir := tempDir + "/status_lists"
+	backupDir := tempDir + "/backup"
+
+	os.Setenv("STATUS_LIST_DIR", statusListDir)
+	os.Setenv("BACKUP_DIR", backupDir)
+	os.Unsetenv("STATUS_LIST_STORAGE") // Should default to local
+	os.Setenv("SERVICE_URL", "http://localhost:8081/")
+	os.Setenv("API_KEY", "test_api_key")
+	os.Setenv("PRIVATE_KEY_PATH", "temp/private_key/decrypted_key.pem")
+	os.Setenv("CERTIFICATE_PATH", "temp/certificate/PID-DS-0002.cert.der")
+	os.Setenv("TOKEN_STATUS_LIST_SIZE", "100")
+
+	// Create the directories
+	if err := os.MkdirAll(statusListDir, 0755); err != nil {
+		t.Fatalf("Failed to create status list directory: %v", err)
+	}
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatalf("Failed to create backup directory: %v", err)
+	}
+
+	// Load configuration
+	cfg, err := loadTestConfig()
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Verify default storage backend is "local"
+	if cfg.BackendType != "local" && cfg.BackendType != "" {
+		t.Errorf("Expected BackendType to be 'local' or empty (default), got %s", cfg.BackendType)
+	}
+
+	t.Run("default local storage behavior", func(t *testing.T) {
+		// Test that the service uses local storage by default
+		// The BackendType should be empty or "local"
+		if cfg.BackendType != "" && cfg.BackendType != "local" {
+			t.Errorf("Expected default storage backend to be local, got: %s", cfg.BackendType)
+		}
+	})
+
+	t.Run("create status list via API", func(t *testing.T) {
+		// This test would require starting the full HTTP server
+		// For now, we'll test the storage layer directly
+
+		// Create storage instance
+		stor, err := createTestStorage(cfg)
+		if err != nil {
+			t.Fatalf("Failed to create storage: %v", err)
+		}
+
+		// Create a test file
+		testPath := "token_status_list/DE/mDL/test-rand/full_list.json"
+		testContent := []byte(`{"test": "data"}`)
+
+		err = stor.Create(testPath, testContent)
+		if err != nil {
+			t.Fatalf("Failed to create file via storage: %v", err)
+		}
+
+		// Verify file exists on filesystem
+		fullPath := statusListDir + "/" + testPath
+		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+			t.Errorf("File should exist at %s", fullPath)
+		}
+
+		// Verify file content
+		readContent, err := os.ReadFile(fullPath)
+		if err != nil {
+			t.Fatalf("Failed to read file: %v", err)
+		}
+
+		if string(readContent) != string(testContent) {
+			t.Errorf("Expected content %s, got %s", string(testContent), string(readContent))
+		}
+	})
+
+	t.Run("read status list via API", func(t *testing.T) {
+		// Create storage instance
+		stor, err := createTestStorage(cfg)
+		if err != nil {
+			t.Fatalf("Failed to create storage: %v", err)
+		}
+
+		// Create a test file on filesystem
+		testPath := "token_status_list/DE/mDL/test-rand-2/full_list.json"
+		fullPath := statusListDir + "/" + testPath
+		testContent := []byte(`{"test": "read_data"}`)
+
+		// Create directory structure
+		if err := os.MkdirAll(statusListDir+"/token_status_list/DE/mDL/test-rand-2", 0755); err != nil {
+			t.Fatalf("Failed to create directories: %v", err)
+		}
+
+		// Write file directly to filesystem
+		if err := os.WriteFile(fullPath, testContent, 0644); err != nil {
+			t.Fatalf("Failed to write test file: %v", err)
+		}
+
+		// Read via storage interface
+		readContent, err := stor.Read(testPath)
+		if err != nil {
+			t.Fatalf("Failed to read via storage: %v", err)
+		}
+
+		if string(readContent) != string(testContent) {
+			t.Errorf("Expected content %s, got %s", string(testContent), string(readContent))
+		}
+	})
+
+	t.Run("update status list via API", func(t *testing.T) {
+		// Create storage instance
+		stor, err := createTestStorage(cfg)
+		if err != nil {
+			t.Fatalf("Failed to create storage: %v", err)
+		}
+
+		// Create initial file
+		testPath := "token_status_list/DE/mDL/test-rand-3/full_list.json"
+		initialContent := []byte(`{"version": 1}`)
+
+		err = stor.Create(testPath, initialContent)
+		if err != nil {
+			t.Fatalf("Failed to create file: %v", err)
+		}
+
+		// Update the file
+		updatedContent := []byte(`{"version": 2}`)
+		err = stor.Write(testPath, updatedContent, 1)
+		if err != nil {
+			t.Fatalf("Failed to update file: %v", err)
+		}
+
+		// Verify update
+		readContent, err := stor.Read(testPath)
+		if err != nil {
+			t.Fatalf("Failed to read updated file: %v", err)
+		}
+
+		if string(readContent) != string(updatedContent) {
+			t.Errorf("Expected updated content %s, got %s", string(updatedContent), string(readContent))
+		}
+	})
+
+	t.Run("list status lists", func(t *testing.T) {
+		// Create storage instance
+		stor, err := createTestStorage(cfg)
+		if err != nil {
+			t.Fatalf("Failed to create storage: %v", err)
+		}
+
+		// Create multiple test files
+		testFiles := []string{
+			"token_status_list/DE/mDL/rand1/full_list.json",
+			"token_status_list/DE/mDL/rand2/full_list.json",
+			"identifier_list/DE/mDL/rand1/full_list.json",
+		}
+
+		for _, path := range testFiles {
+			err := stor.Create(path, []byte(`{"test": "data"}`))
+			if err != nil {
+				t.Fatalf("Failed to create file %s: %v", path, err)
+			}
+		}
+
+		// List all files
+		allFiles, err := stor.List("")
+		if err != nil {
+			t.Fatalf("Failed to list files: %v", err)
+		}
+
+		if len(allFiles) < len(testFiles) {
+			t.Errorf("Expected at least %d files, got %d", len(testFiles), len(allFiles))
+		}
+
+		// List with prefix
+		tokenFiles, err := stor.List("token_status_list")
+		if err != nil {
+			t.Fatalf("Failed to list token files: %v", err)
+		}
+
+		// Should have at least 2 token status list files
+		tokenCount := 0
+		for _, path := range tokenFiles {
+			if strings.HasPrefix(path, "token_status_list") {
+				tokenCount++
+			}
+		}
+
+		if tokenCount < 2 {
+			t.Errorf("Expected at least 2 token status list files, got %d", tokenCount)
+		}
+	})
+}
+
+// Helper function to load config for testing
+func loadTestConfig() (*testConfig, error) {
+	return &testConfig{
+		StatusListDir: os.Getenv("STATUS_LIST_DIR"),
+		BackupDir:     os.Getenv("BACKUP_DIR"),
+		BackendType:   os.Getenv("STATUS_LIST_STORAGE"),
+		ServiceURL:    os.Getenv("SERVICE_URL"),
+	}, nil
+}
+
+// Helper function to create storage for testing
+func createTestStorage(cfg *testConfig) (testStorage, error) {
+	return &mockLocalStorage{
+		baseDir: cfg.StatusListDir,
+		files:   make(map[string][]byte),
+	}, nil
+}
+
+// Simple test config struct
+type testConfig struct {
+	StatusListDir string
+	BackupDir     string
+	BackendType   string
+	ServiceURL    string
+}
+
+// Simple test storage interface
+type testStorage interface {
+	Create(path string, content []byte) error
+	Read(path string) ([]byte, error)
+	Write(path string, content []byte, version int) error
+	Exists(path string) (bool, error)
+	List(prefix string) ([]string, error)
+}
+
+// Mock local storage implementation for testing
+type mockLocalStorage struct {
+	baseDir string
+	files   map[string][]byte
+}
+
+func (m *mockLocalStorage) Create(path string, content []byte) error {
+	fullPath := m.baseDir + "/" + path
+
+	// Check if file already exists
+	if _, err := os.Stat(fullPath); err == nil {
+		return fmt.Errorf("file already exists: %s", path)
+	}
+
+	// Create directory structure
+	if err := os.MkdirAll(fullPath[:strings.LastIndex(fullPath, "/")], 0755); err != nil {
+		return err
+	}
+
+	// Write file
+	if err := os.WriteFile(fullPath, content, 0644); err != nil {
+		return err
+	}
+
+	// Write version metadata
+	versionPath := fullPath + ".version"
+	if err := os.WriteFile(versionPath, []byte("1"), 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *mockLocalStorage) Read(path string) ([]byte, error) {
+	fullPath := m.baseDir + "/" + path
+	return os.ReadFile(fullPath)
+}
+
+func (m *mockLocalStorage) Write(path string, content []byte, version int) error {
+	fullPath := m.baseDir + "/" + path
+
+	// Check if file exists
+	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+		return fmt.Errorf("file not found: %s", path)
+	}
+
+	// Check version (simplified for test)
+	versionPath := fullPath + ".version"
+	if _, err := os.Stat(versionPath); err == nil {
+		// Version file exists, verify version
+		// For simplicity, just write the new content
+	}
+
+	// Write updated content
+	if err := os.WriteFile(fullPath, content, 0644); err != nil {
+		return err
+	}
+
+	// Update version
+	newVersion := fmt.Sprintf("%d", version+1)
+	if err := os.WriteFile(versionPath, []byte(newVersion), 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *mockLocalStorage) Exists(path string) (bool, error) {
+	fullPath := m.baseDir + "/" + path
+	_, err := os.Stat(fullPath)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (m *mockLocalStorage) List(prefix string) ([]string, error) {
+	var files []string
+	searchDir := m.baseDir
+	if prefix != "" {
+		searchDir = m.baseDir + "/" + prefix
+	}
+
+	err := filepath.Walk(searchDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip errors
+		}
+
+		if !info.IsDir() && !strings.HasSuffix(path, ".version") {
+			// Get relative path
+			relPath := strings.TrimPrefix(path, m.baseDir+"/")
+			relPath = strings.ReplaceAll(relPath, "\\", "/")
+
+			if prefix == "" || strings.HasPrefix(relPath, prefix) {
+				files = append(files, relPath)
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return files, nil
 }

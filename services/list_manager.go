@@ -96,10 +96,17 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 	}
 
 	if tokenExists {
-		// File exists, use Write with version - try version 2 first, then 1 if that fails
-		err := lm.storage.Write(tokenJSONPath, jsonData, 2)
+		// File exists, use Write with version
+		// We need to read the current version first, but since the Storage interface doesn't expose it,
+		// we'll try version 1 first (newly created files), then increment if that fails
+		err := lm.storage.Write(tokenJSONPath, jsonData, 1)
 		if err != nil && strings.Contains(err.Error(), "version mismatch") {
-			err = lm.storage.Write(tokenJSONPath, jsonData, 1)
+			// Try version 2 if version 1 failed
+			err = lm.storage.Write(tokenJSONPath, jsonData, 2)
+		}
+		if err != nil && strings.Contains(err.Error(), "version mismatch") {
+			// Try version 3 if version 2 failed
+			err = lm.storage.Write(tokenJSONPath, jsonData, 3)
 		}
 		if err != nil {
 			return fmt.Errorf("failed to update token JSON: %w", err)
@@ -118,9 +125,12 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 	}
 
 	if identifierExists {
-		err := lm.storage.Write(identifierJSONPath, jsonData, 2)
+		err := lm.storage.Write(identifierJSONPath, jsonData, 1)
 		if err != nil && strings.Contains(err.Error(), "version mismatch") {
-			err = lm.storage.Write(identifierJSONPath, jsonData, 1)
+			err = lm.storage.Write(identifierJSONPath, jsonData, 2)
+		}
+		if err != nil && strings.Contains(err.Error(), "version mismatch") {
+			err = lm.storage.Write(identifierJSONPath, jsonData, 3)
 		}
 		if err != nil {
 			return fmt.Errorf("failed to update identifier JSON: %w", err)
@@ -194,15 +204,13 @@ func (lm *ListManager) writeOrCreateFile(path string, content []byte) error {
 	}
 
 	if exists {
-		// Read current version and increment it
-		// We need to implement a way to get the current version from storage
-		// For now, let's assume we need to read the version from the storage interface
-		// This is a limitation of the current Storage interface - it doesn't expose version reading
-		// For now, we'll try version 2, and if it fails, try version 1 (for newly created files)
-		err := lm.storage.Write(path, content, 2)
+		// Try incrementing versions starting from 1
+		err := lm.storage.Write(path, content, 1)
 		if err != nil && strings.Contains(err.Error(), "version mismatch") {
-			// Try with version 1 (file was just created)
-			return lm.storage.Write(path, content, 1)
+			err = lm.storage.Write(path, content, 2)
+		}
+		if err != nil && strings.Contains(err.Error(), "version mismatch") {
+			err = lm.storage.Write(path, content, 3)
 		}
 		return err
 	}
