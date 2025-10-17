@@ -367,6 +367,7 @@ func TestGetIndex(t *testing.T) {
 	handler := NewStatusListHandler(cfg, stor)
 
 	// Create a test status list
+	createTestStatusList(t, cfg, stor, "LV", "PID", "test-rand")
 
 	tests := []struct {
 		name           string
@@ -380,7 +381,7 @@ func TestGetIndex(t *testing.T) {
 			name:   "Valid request with idx",
 			method: "GET",
 			queryParams: map[string]string{
-				"uri": "",
+				"uri": "http://localhost:8080/token_status_list/LV/PID/test-rand",
 				"idx": "0",
 			},
 			expectedStatus: http.StatusOK,
@@ -390,8 +391,8 @@ func TestGetIndex(t *testing.T) {
 			name:   "Valid request with id",
 			method: "GET",
 			queryParams: map[string]string{
-				"uri": "",
-				"id":  "1",
+				"uri": "http://localhost:8080/token_status_list/LV/PID/test-rand",
+				"id":  "5",
 			},
 			expectedStatus: http.StatusOK,
 			expectedBody:   "0",
@@ -424,7 +425,7 @@ func TestGetIndex(t *testing.T) {
 			name:   "Invalid index format",
 			method: "GET",
 			queryParams: map[string]string{
-				"uri": "",
+				"uri": "http://localhost:8080/token_status_list/LV/PID/test",
 				"idx": "invalid",
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -454,7 +455,7 @@ func TestGetIndex(t *testing.T) {
 			name:   "Index within range but high",
 			method: "GET",
 			queryParams: map[string]string{
-				"uri": "",
+				"uri": "http://localhost:8080/token_status_list/LV/PID/test-rand",
 				"idx": "99",
 			},
 			expectedStatus: http.StatusOK,
@@ -632,7 +633,7 @@ func TestSetIndex(t *testing.T) {
 				"X-Api-Key": "test-api-key",
 			},
 			formData: map[string]string{
-				"uri":    "",
+				"uri":    "http://localhost:8080/token_status_list/LV/PID/test",
 				"idx":    "invalid",
 				"status": "1",
 			},
@@ -646,7 +647,7 @@ func TestSetIndex(t *testing.T) {
 				"X-Api-Key": "test-api-key",
 			},
 			formData: map[string]string{
-				"uri":    "",
+				"uri":    "http://localhost:8080/token_status_list/LV/PID/test",
 				"idx":    "0",
 				"status": "invalid",
 			},
@@ -660,7 +661,7 @@ func TestSetIndex(t *testing.T) {
 				"X-Api-Key": "test-api-key",
 			},
 			formData: map[string]string{
-				"uri":    "",
+				"uri":    "http://localhost:8080/token_status_list/LV/PID/test",
 				"idx":    "0",
 				"status": "2",
 			},

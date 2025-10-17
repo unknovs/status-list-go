@@ -714,19 +714,20 @@ func (m *mockLocalStorage) Create(path string, content []byte) error {
 	}
 
 	// Create directory structure
-	if err := os.MkdirAll(fullPath[:strings.LastIndex(fullPath, "/")], 0755); err != nil {
-		return err
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %v", dir, err)
 	}
 
 	// Write file
 	if err := os.WriteFile(fullPath, content, 0644); err != nil {
-		return err
+		return fmt.Errorf("failed to write file %s: %v", fullPath, err)
 	}
 
 	// Write version metadata
 	versionPath := fullPath + ".version"
 	if err := os.WriteFile(versionPath, []byte("1"), 0644); err != nil {
-		return err
+		return fmt.Errorf("failed to write version file %s: %v", versionPath, err)
 	}
 
 	return nil
@@ -780,19 +781,18 @@ func (m *mockLocalStorage) Exists(path string) (bool, error) {
 
 func (m *mockLocalStorage) List(prefix string) ([]string, error) {
 	var files []string
-	searchDir := m.baseDir
-	if prefix != "" {
-		searchDir = m.baseDir + "/" + prefix
-	}
 
-	err := filepath.Walk(searchDir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(m.baseDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors
 		}
 
 		if !info.IsDir() && !strings.HasSuffix(path, ".version") {
 			// Get relative path
-			relPath := strings.TrimPrefix(path, m.baseDir+"/")
+			relPath, err := filepath.Rel(m.baseDir, path)
+			if err != nil {
+				return err
+			}
 			relPath = strings.ReplaceAll(relPath, "\\", "/")
 
 			if prefix == "" || strings.HasPrefix(relPath, prefix) {
