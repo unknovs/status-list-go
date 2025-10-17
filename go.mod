@@ -1,6 +1,6 @@
 module github.com/unknovs/status-list-go
 
-go 1.23.9
+go 1.25.1
 
 require (
 	github.com/fxamacker/cbor/v2 v2.9.0
