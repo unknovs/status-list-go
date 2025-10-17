@@ -78,7 +78,7 @@ func (ls *LocalStorage) Write(path string, content []byte, version int) error {
 	versionPath := fullPath + ".version"
 
 	// Check current version
-	currentVersion, err := ls.getVersion(path)
+	currentVersion, err := ls.GetVersion(path)
 	if err != nil {
 		// If version file doesn't exist, treat as version 0 (new file)
 		if !os.IsNotExist(err) {
@@ -164,8 +164,8 @@ func (ls *LocalStorage) List(prefix string) ([]string, error) {
 	return results, nil
 }
 
-// getVersion reads the current version of a file from its metadata.
-func (ls *LocalStorage) getVersion(path string) (int, error) {
+// GetVersion reads the current version of a file from its metadata.
+func (ls *LocalStorage) GetVersion(path string) (int, error) {
 	fullPath := filepath.Join(ls.StatusListDir, path)
 	versionPath := fullPath + ".version"
 

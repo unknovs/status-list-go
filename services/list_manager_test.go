@@ -118,6 +118,21 @@ func (m *MockStorage) List(prefix string) ([]string, error) {
 	return paths, nil
 }
 
+func (m *MockStorage) GetVersion(path string) (int, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	// Normalize path to use forward slashes
+	path = strings.ReplaceAll(path, "\\", "/")
+
+	version, exists := m.version[path]
+	if !exists {
+		return 0, fmt.Errorf("file not found: %s", path)
+	}
+
+	return version, nil
+}
+
 // TestNewListManager tests the creation of a new ListManager
 func TestNewListManager(t *testing.T) {
 	cfg := &config.Config{

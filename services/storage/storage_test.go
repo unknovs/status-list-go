@@ -35,3 +35,7 @@ func (m *mockStorage) Exists(path string) (bool, error) {
 func (m *mockStorage) List(prefix string) ([]string, error) {
 	return nil, nil
 }
+
+func (m *mockStorage) GetVersion(path string) (int, error) {
+	return 0, nil
+}

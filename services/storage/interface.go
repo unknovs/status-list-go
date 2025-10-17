@@ -25,4 +25,8 @@ type Storage interface {
 	// Used by renewal process to discover status list files.
 	// Returns slice of relative paths and any error encountered.
 	List(prefix string) ([]string, error)
+
+	// GetVersion retrieves the current version number of a file.
+	// Returns 0 if file doesn't exist, current version if exists, and any error encountered.
+	GetVersion(path string) (int, error)
 }

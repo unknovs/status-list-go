@@ -38,15 +38,46 @@ func TestNewStorage(t *testing.T) {
 			errorMsg:    "unsupported storage backend",
 		},
 		{
-			name: "s3 backend - will be tested in US2",
+			name: "s3 backend with valid config",
 			cfg: &config.Config{
 				BackendType:       "s3",
 				S3Bucket:          "test-bucket",
 				S3AccessKeyID:     "test-key",
 				S3SecretAccessKey: "test-secret",
+				S3Region:          "us-east-1",
 			},
-			expectError: true, // Not yet implemented in US1
-			errorMsg:    "S3 storage not yet implemented",
+			expectError: true, // Will fail on connection validation in real test
+			errorMsg:    "failed to validate S3 connection",
+		},
+		{
+			name: "s3 backend missing bucket",
+			cfg: &config.Config{
+				BackendType:       "s3",
+				S3AccessKeyID:     "test-key",
+				S3SecretAccessKey: "test-secret",
+			},
+			expectError: true,
+			errorMsg:    "S3_BUCKET is required",
+		},
+		{
+			name: "s3 backend missing access key",
+			cfg: &config.Config{
+				BackendType:       "s3",
+				S3Bucket:          "test-bucket",
+				S3SecretAccessKey: "test-secret",
+			},
+			expectError: true,
+			errorMsg:    "S3_ACCESS_KEY_ID is required",
+		},
+		{
+			name: "s3 backend missing secret key",
+			cfg: &config.Config{
+				BackendType:   "s3",
+				S3Bucket:      "test-bucket",
+				S3AccessKeyID: "test-key",
+			},
+			expectError: true,
+			errorMsg:    "S3_SECRET_ACCESS_KEY is required",
 		},
 	}
 

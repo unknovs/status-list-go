@@ -50,6 +50,11 @@ func NewListManager(cfg *config.Config, stor storage.Storage) *ListManager {
 	}
 }
 
+// GetStorage returns the storage backend for direct access when needed
+func (lm *ListManager) GetStorage() storage.Storage {
+	return lm.storage
+}
+
 // NewList initializes a new status list for a country and doctype
 func (lm *ListManager) NewList(country, doctype string) {
 	lm.mutex.Lock()
@@ -96,19 +101,12 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 	}
 
 	if tokenExists {
-		// File exists, use Write with version
-		// We need to read the current version first, but since the Storage interface doesn't expose it,
-		// we'll try version 1 first (newly created files), then increment if that fails
-		err := lm.storage.Write(tokenJSONPath, jsonData, 1)
-		if err != nil && strings.Contains(err.Error(), "version mismatch") {
-			// Try version 2 if version 1 failed
-			err = lm.storage.Write(tokenJSONPath, jsonData, 2)
-		}
-		if err != nil && strings.Contains(err.Error(), "version mismatch") {
-			// Try version 3 if version 2 failed
-			err = lm.storage.Write(tokenJSONPath, jsonData, 3)
-		}
+		// Get current version and increment it
+		currentVersion, err := lm.storage.GetVersion(tokenJSONPath)
 		if err != nil {
+			return fmt.Errorf("failed to get token file version: %w", err)
+		}
+		if err := lm.storage.Write(tokenJSONPath, jsonData, currentVersion+1); err != nil {
 			return fmt.Errorf("failed to update token JSON: %w", err)
 		}
 	} else {
@@ -125,14 +123,11 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 	}
 
 	if identifierExists {
-		err := lm.storage.Write(identifierJSONPath, jsonData, 1)
-		if err != nil && strings.Contains(err.Error(), "version mismatch") {
-			err = lm.storage.Write(identifierJSONPath, jsonData, 2)
-		}
-		if err != nil && strings.Contains(err.Error(), "version mismatch") {
-			err = lm.storage.Write(identifierJSONPath, jsonData, 3)
-		}
+		currentVersion, err := lm.storage.GetVersion(identifierJSONPath)
 		if err != nil {
+			return fmt.Errorf("failed to get identifier file version: %w", err)
+		}
+		if err := lm.storage.Write(identifierJSONPath, jsonData, currentVersion+1); err != nil {
 			return fmt.Errorf("failed to update identifier JSON: %w", err)
 		}
 	} else {
@@ -204,15 +199,12 @@ func (lm *ListManager) writeOrCreateFile(path string, content []byte) error {
 	}
 
 	if exists {
-		// Try incrementing versions starting from 1
-		err := lm.storage.Write(path, content, 1)
-		if err != nil && strings.Contains(err.Error(), "version mismatch") {
-			err = lm.storage.Write(path, content, 2)
+		// Get current version and increment it
+		currentVersion, err := lm.storage.GetVersion(path)
+		if err != nil {
+			return fmt.Errorf("failed to get current version: %w", err)
 		}
-		if err != nil && strings.Contains(err.Error(), "version mismatch") {
-			err = lm.storage.Write(path, content, 3)
-		}
-		return err
+		return lm.storage.Write(path, content, currentVersion+1)
 	}
 
 	return lm.storage.Create(path, content)
