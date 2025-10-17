@@ -125,6 +125,7 @@ HOST{/token_status_list/swagger}
 ## Features
 
 - Supports Attestation Status List (ASL) [draft-ietf-oauth-status-list-02](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-status-list-02)
+  * need to check diferences with draft v12
 - Supports Attestation Revocation List (ARL) [ ISO/IEC CD 18013-5 second edition ]
 
 ## How to contribute
