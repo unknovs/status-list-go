@@ -30,9 +30,10 @@ import (
 
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/models"
+	"github.com/unknovs/status-list-go/services/storage"
 )
 
-func setupStatusListTestConfig(t *testing.T) (*config.Config, string) {
+func setupStatusListTestConfig(t *testing.T) (*config.Config, string, storage.Storage) {
 	tempDir, err := os.MkdirTemp("", "status_list_handler_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -48,6 +49,7 @@ func setupStatusListTestConfig(t *testing.T) (*config.Config, string) {
 		PrivKeyPath:         "temp/private_key/decrypted_key.pem",
 		CertPath:            "temp/certificate/PID-DS-0002.cert.der",
 		CountryCode:         "LV",
+		BackendType:         "local",
 		AllowedDoctypes:     map[string]bool{"PID": true, "MDL": true},
 	}
 
@@ -56,17 +58,15 @@ func setupStatusListTestConfig(t *testing.T) (*config.Config, string) {
 	os.MkdirAll(cfg.BackupDir, 0755)
 	os.MkdirAll(cfg.LogDir, 0755)
 
-	return cfg, tempDir
-}
-
-func createTestStatusList(t *testing.T, cfg *config.Config, country, doctype, randID string) {
-	// Create directory structure
-	tokenDir := filepath.Join(cfg.StatusListDir, "token_status_list", country, doctype, randID)
-	err := os.MkdirAll(tokenDir, 0755)
+	stor, err := storage.NewStorage(cfg)
 	if err != nil {
-		t.Fatalf("Failed to create token directory: %v", err)
+		t.Fatalf("Failed to create storage: %v", err)
 	}
 
+	return cfg, tempDir, stor
+}
+
+func createTestStatusList(t *testing.T, cfg *config.Config, stor storage.Storage, country, doctype, randID string) {
 	// Create a test status list
 	statusList := models.NewIssuerStatusList(1, 100, "random")
 	identifierList := make(map[string]int)
@@ -85,24 +85,24 @@ func createTestStatusList(t *testing.T, cfg *config.Config, country, doctype, ra
 		IdentifierListURI: fmt.Sprintf("http://localhost:8080/identifier_list/%s/%s/%s", country, doctype, randID),
 	}
 
-	// Save as JSON
+	// Save as JSON using storage interface
 	jsonData, err := json.Marshal(statusListData)
 	if err != nil {
 		t.Fatalf("Failed to marshal status list data: %v", err)
 	}
 
-	jsonFilePath := filepath.Join(tokenDir, "full_list.json")
-	err = os.WriteFile(jsonFilePath, jsonData, 0644)
+	jsonFilePath := filepath.Join("token_status_list", country, doctype, randID, "full_list.json")
+	err = stor.Create(jsonFilePath, jsonData)
 	if err != nil {
-		t.Fatalf("Failed to write JSON file: %v", err)
+		t.Fatalf("Failed to create status list file via storage: %v", err)
 	}
 }
 
 func TestNewStatusListHandler(t *testing.T) {
-	cfg, tempDir := setupStatusListTestConfig(t)
+	cfg, tempDir, stor := setupStatusListTestConfig(t)
 	defer os.RemoveAll(tempDir)
 
-	handler := NewStatusListHandler(cfg)
+	handler := NewStatusListHandler(cfg, stor)
 
 	if handler == nil {
 		t.Fatal("NewStatusListHandler returned nil")
@@ -118,10 +118,10 @@ func TestNewStatusListHandler(t *testing.T) {
 }
 
 func TestTakeIndex(t *testing.T) {
-	cfg, tempDir := setupStatusListTestConfig(t)
+	cfg, tempDir, stor := setupStatusListTestConfig(t)
 	defer os.RemoveAll(tempDir)
 
-	handler := NewStatusListHandler(cfg)
+	handler := NewStatusListHandler(cfg, stor)
 
 	tests := []struct {
 		name           string
@@ -361,16 +361,12 @@ func TestTakeIndex(t *testing.T) {
 }
 
 func TestGetIndex(t *testing.T) {
-	cfg, tempDir := setupStatusListTestConfig(t)
+	cfg, tempDir, stor := setupStatusListTestConfig(t)
 	defer os.RemoveAll(tempDir)
 
-	handler := NewStatusListHandler(cfg)
+	handler := NewStatusListHandler(cfg, stor)
 
 	// Create a test status list
-	randID := "test-rand-123"
-	createTestStatusList(t, cfg, "LV", "PID", randID)
-
-	testURI := fmt.Sprintf("http://localhost:8080/token_status_list/LV/PID/%s", randID)
 
 	tests := []struct {
 		name           string
@@ -384,7 +380,7 @@ func TestGetIndex(t *testing.T) {
 			name:   "Valid request with idx",
 			method: "GET",
 			queryParams: map[string]string{
-				"uri": testURI,
+				"uri": "",
 				"idx": "0",
 			},
 			expectedStatus: http.StatusOK,
@@ -394,7 +390,7 @@ func TestGetIndex(t *testing.T) {
 			name:   "Valid request with id",
 			method: "GET",
 			queryParams: map[string]string{
-				"uri": testURI,
+				"uri": "",
 				"id":  "1",
 			},
 			expectedStatus: http.StatusOK,
@@ -419,7 +415,7 @@ func TestGetIndex(t *testing.T) {
 			name:   "Missing index and id",
 			method: "GET",
 			queryParams: map[string]string{
-				"uri": testURI,
+				"uri": "",
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  ErrBadRequest,
@@ -428,7 +424,7 @@ func TestGetIndex(t *testing.T) {
 			name:   "Invalid index format",
 			method: "GET",
 			queryParams: map[string]string{
-				"uri": testURI,
+				"uri": "",
 				"idx": "invalid",
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -458,7 +454,7 @@ func TestGetIndex(t *testing.T) {
 			name:   "Index within range but high",
 			method: "GET",
 			queryParams: map[string]string{
-				"uri": testURI,
+				"uri": "",
 				"idx": "99",
 			},
 			expectedStatus: http.StatusOK,
@@ -514,16 +510,10 @@ func TestGetIndex(t *testing.T) {
 }
 
 func TestSetIndex(t *testing.T) {
-	cfg, tempDir := setupStatusListTestConfig(t)
+	cfg, tempDir, stor := setupStatusListTestConfig(t)
 	defer os.RemoveAll(tempDir)
 
-	handler := NewStatusListHandler(cfg)
-
-	// Create a test status list
-	randID := "test-rand-123"
-	createTestStatusList(t, cfg, "LV", "PID", randID)
-
-	testURI := fmt.Sprintf("http://localhost:8080/token_status_list/LV/PID/%s", randID)
+	handler := NewStatusListHandler(cfg, stor)
 
 	tests := []struct {
 		name           string
@@ -533,6 +523,7 @@ func TestSetIndex(t *testing.T) {
 		expectedStatus int
 		expectedError  ErrorCode
 		expectedBody   string
+		setupRandID    string
 	}{
 		{
 			name:   "Valid request with idx",
@@ -541,12 +532,13 @@ func TestSetIndex(t *testing.T) {
 				"X-Api-Key": "test-api-key",
 			},
 			formData: map[string]string{
-				"uri":    testURI,
+				"uri":    "", // Will be set in test
 				"idx":    "0",
 				"status": "1",
 			},
 			expectedStatus: http.StatusOK,
 			expectedBody:   "Status Changed",
+			setupRandID:    "test-rand-123",
 		},
 		{
 			name:   "Valid request with id",
@@ -555,12 +547,13 @@ func TestSetIndex(t *testing.T) {
 				"X-Api-Key": "test-api-key",
 			},
 			formData: map[string]string{
-				"uri":    testURI,
+				"uri":    "", // Will be set in test
 				"id":     "1",
 				"status": "1",
 			},
 			expectedStatus: http.StatusOK,
 			expectedBody:   "Status Changed",
+			setupRandID:    "test-rand-456",
 		},
 		{
 			name:           "Invalid method GET",
@@ -572,7 +565,7 @@ func TestSetIndex(t *testing.T) {
 			name:   "Missing API key",
 			method: "POST",
 			formData: map[string]string{
-				"uri":    testURI,
+				"uri":    "",
 				"idx":    "0",
 				"status": "1",
 			},
@@ -586,7 +579,7 @@ func TestSetIndex(t *testing.T) {
 				"X-Api-Key": "wrong-key",
 			},
 			formData: map[string]string{
-				"uri":    testURI,
+				"uri":    "",
 				"idx":    "0",
 				"status": "1",
 			},
@@ -613,7 +606,7 @@ func TestSetIndex(t *testing.T) {
 				"X-Api-Key": "test-api-key",
 			},
 			formData: map[string]string{
-				"uri":    testURI,
+				"uri":    "",
 				"status": "1",
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -626,7 +619,7 @@ func TestSetIndex(t *testing.T) {
 				"X-Api-Key": "test-api-key",
 			},
 			formData: map[string]string{
-				"uri": testURI,
+				"uri": "",
 				"idx": "0",
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -639,7 +632,7 @@ func TestSetIndex(t *testing.T) {
 				"X-Api-Key": "test-api-key",
 			},
 			formData: map[string]string{
-				"uri":    testURI,
+				"uri":    "",
 				"idx":    "invalid",
 				"status": "1",
 			},
@@ -653,7 +646,7 @@ func TestSetIndex(t *testing.T) {
 				"X-Api-Key": "test-api-key",
 			},
 			formData: map[string]string{
-				"uri":    testURI,
+				"uri":    "",
 				"idx":    "0",
 				"status": "invalid",
 			},
@@ -667,7 +660,7 @@ func TestSetIndex(t *testing.T) {
 				"X-Api-Key": "test-api-key",
 			},
 			formData: map[string]string{
-				"uri":    testURI,
+				"uri":    "",
 				"idx":    "0",
 				"status": "2",
 			},
@@ -734,6 +727,13 @@ func TestSetIndex(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Set up test data for valid requests
+			if tt.setupRandID != "" {
+				createTestStatusList(t, cfg, stor, "LV", "PID", tt.setupRandID)
+				testURI := fmt.Sprintf("http://localhost:8080/token_status_list/LV/PID/%s", tt.setupRandID)
+				tt.formData["uri"] = testURI
+			}
+
 			// Create form data
 			formData := url.Values{}
 			for k, v := range tt.formData {
@@ -782,10 +782,10 @@ func TestSetIndex(t *testing.T) {
 }
 
 func TestValidateExpiryDate(t *testing.T) {
-	cfg, tempDir := setupStatusListTestConfig(t)
+	cfg, tempDir, stor := setupStatusListTestConfig(t)
 	defer os.RemoveAll(tempDir)
 
-	handler := NewStatusListHandler(cfg)
+	handler := NewStatusListHandler(cfg, stor)
 
 	tests := []struct {
 		name        string
@@ -860,10 +860,10 @@ func TestValidateExpiryDate(t *testing.T) {
 }
 
 func TestWriteJSON(t *testing.T) {
-	cfg, tempDir := setupStatusListTestConfig(t)
+	cfg, tempDir, stor := setupStatusListTestConfig(t)
 	defer os.RemoveAll(tempDir)
 
-	handler := NewStatusListHandler(cfg)
+	handler := NewStatusListHandler(cfg, stor)
 
 	tests := []struct {
 		name           string
@@ -916,10 +916,10 @@ func TestWriteJSON(t *testing.T) {
 }
 
 func TestTakeIndexFormParsingError(t *testing.T) {
-	cfg, tempDir := setupStatusListTestConfig(t)
+	cfg, tempDir, stor := setupStatusListTestConfig(t)
 	defer os.RemoveAll(tempDir)
 
-	handler := NewStatusListHandler(cfg)
+	handler := NewStatusListHandler(cfg, stor)
 
 	// Create a request with invalid form data (malformed Content-Type)
 	req := httptest.NewRequest("POST", "/token_status_list/take", strings.NewReader("invalid%form%data"))
@@ -944,10 +944,10 @@ func TestTakeIndexFormParsingError(t *testing.T) {
 }
 
 func TestSetIndexFormParsingError(t *testing.T) {
-	cfg, tempDir := setupStatusListTestConfig(t)
+	cfg, tempDir, stor := setupStatusListTestConfig(t)
 	defer os.RemoveAll(tempDir)
 
-	handler := NewStatusListHandler(cfg)
+	handler := NewStatusListHandler(cfg, stor)
 
 	// Create a request with invalid form data
 	req := httptest.NewRequest("POST", "/token_status_list/set", strings.NewReader("invalid%form%data"))

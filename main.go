@@ -27,6 +27,7 @@ import (
 	"github.com/unknovs/status-list-go/app"
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/renewal"
+	"github.com/unknovs/status-list-go/services/storage"
 )
 
 func main() {
@@ -46,8 +47,15 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Start renewal thread
-	renewal.StartRenewalThread(cfg)
+	// Initialize storage backend
+	stor, err := storage.NewStorage(cfg)
+	if err != nil {
+		log.Fatalf("Failed to initialize storage backend: %v", err)
+	}
+	log.Printf("Initialized storage backend: %s", cfg.BackendType)
+
+	// Start renewal thread with storage backend
+	renewal.StartRenewalThread(cfg, stor)
 
 	// Create and start the application
 	application := app.NewApp(cfg)

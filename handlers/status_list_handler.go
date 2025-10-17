@@ -28,6 +28,7 @@ import (
 
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/services"
+	"github.com/unknovs/status-list-go/services/storage"
 )
 
 // StatusListHandler handles status list related requests
@@ -37,10 +38,10 @@ type StatusListHandler struct {
 }
 
 // NewStatusListHandler creates a new status list handler
-func NewStatusListHandler(cfg *config.Config) *StatusListHandler {
+func NewStatusListHandler(cfg *config.Config, stor storage.Storage) *StatusListHandler {
 	return &StatusListHandler{
 		config:      cfg,
-		listManager: services.NewListManager(cfg),
+		listManager: services.NewListManager(cfg, stor),
 	}
 }
 

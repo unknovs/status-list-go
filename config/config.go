@@ -37,6 +37,14 @@ type Config struct {
 	CertPath    string
 	CountryCode string
 
+	// Storage configuration
+	BackendType       string // "local" or "s3"
+	S3Bucket          string
+	S3Region          string
+	S3AccessKeyID     string
+	S3SecretAccessKey string
+	S3Endpoint        string // Custom S3 endpoint for compatible services (optional)
+
 	AllowedDoctypes map[string]bool
 }
 
@@ -59,6 +67,14 @@ func Load() (*Config, error) {
 		PrivKeyPath: getEnv("PRIVATE_KEY_PATH", "temp/private_key/decrypted_key.pem"),
 		CertPath:    getEnv("CERTIFICATE_PATH", "temp/certificate/PID-DS-0002.cert.der"),
 		CountryCode: getEnv("COUNTRY_CODE", "LV"),
+
+		// Storage configuration
+		BackendType:       getEnv("STATUS_LIST_STORAGE", "local"),
+		S3Bucket:          getEnv("S3_BUCKET", ""),
+		S3Region:          getEnv("S3_REGION", "us-east-1"),
+		S3AccessKeyID:     getEnv("S3_ACCESS_KEY_ID", ""),
+		S3SecretAccessKey: getEnv("S3_SECRET_ACCESS_KEY", ""),
+		S3Endpoint:        getEnv("S3_ENDPOINT", ""),
 
 		AllowedDoctypes: getAllowedDoctypes(),
 	}

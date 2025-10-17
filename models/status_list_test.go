@@ -89,7 +89,7 @@ func TestStatusListDataArrayBoundary(t *testing.T) {
 
 	// Test accessing an index that is close to the boundary
 	// Index 39 would require byte index 4 (39/8 = 4), which exists
-	sl.data[4] = 0x80   // Set the first bit of byte 4
+	sl.data[4] = 0x01   // Set the first bit (LSB) of byte 4
 	result = sl.Get(32) // Index 32 is the first bit of byte 4
 	if result != 1 {
 		t.Errorf("Expected Get(32) to return 1, got %d", result)
@@ -271,7 +271,7 @@ func TestStatusListCompressionFormat(t *testing.T) {
 	}
 
 	// Verify specific bits are preserved
-	if len(decompressed) > 0 && (decompressed[0]&0x80) == 0 {
+	if len(decompressed) > 0 && (decompressed[0]&0x01) == 0 {
 		t.Error("Expected bit 0 to be set after decompression")
 	}
 

@@ -306,6 +306,9 @@ func TestMain_NormalExecution(t *testing.T) {
 			os.Setenv("BACKUP_DIR", tempDir+"/backup")
 			os.Setenv("LOG_DIR", tempDir+"/logs")
 			os.Setenv("API_KEY", "test_key")
+			os.Setenv("PRIVATE_KEY_PATH", "temp/private_key/decrypted_key.pem")
+			os.Setenv("CERTIFICATE_PATH", "temp/certificate/PID-DS-0002.cert.der")
+			os.Setenv("PORT", "8081")
 
 			// Override command line arguments (no health-check flag)
 			os.Args = []string{"status-list-go"}
@@ -329,33 +332,23 @@ func TestMain_NormalExecution(t *testing.T) {
 			"BACKUP_DIR="+tempDir+"/backup",
 			"LOG_DIR="+tempDir+"/logs",
 			"API_KEY=test_key",
+			"PRIVATE_KEY_PATH=temp/private_key/decrypted_key.pem",
+			"CERTIFICATE_PATH=temp/certificate/PID-DS-0002.cert.der",
+			"PORT=8081",
 		)
 
-		// Set a timeout for the command
-		done := make(chan error, 1)
-		go func() {
-			_, err := cmd.CombinedOutput()
-			done <- err
-		}()
+		// Capture output to see the error
+		output, err := cmd.CombinedOutput()
+		t.Logf("Command output: %s", string(output))
 
-		select {
-		case err := <-done:
-			if err != nil {
-				if exitError, ok := err.(*exec.ExitError); ok {
-					if exitError.ExitCode() != 0 {
-						t.Errorf("Expected successful startup (exit code 0), got %d", exitError.ExitCode())
-					}
-				} else {
-					t.Errorf("Unexpected error: %v", err)
+		if err != nil {
+			if exitError, ok := err.(*exec.ExitError); ok {
+				if exitError.ExitCode() != 0 {
+					t.Errorf("Expected successful startup (exit code 0), got %d. Output: %s", exitError.ExitCode(), string(output))
 				}
+			} else {
+				t.Errorf("Unexpected error: %v. Output: %s", err, string(output))
 			}
-		case <-time.After(5 * time.Second):
-			// If the process is still running after 5 seconds, kill it
-			// This indicates successful startup since it didn't fail immediately
-			if cmd.Process != nil {
-				cmd.Process.Kill()
-			}
-			// This is actually a success - the application started and didn't immediately crash
 		}
 	})
 }

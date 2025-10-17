@@ -26,9 +26,10 @@ import (
 	"testing"
 
 	"github.com/unknovs/status-list-go/config"
+	"github.com/unknovs/status-list-go/services/storage"
 )
 
-func setupTestConfig(t *testing.T) (*config.Config, string) {
+func setupTestConfig(t *testing.T) (*config.Config, string, storage.Storage) {
 	tempDir, err := os.MkdirTemp("", "serve_status_list_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -45,9 +46,15 @@ func setupTestConfig(t *testing.T) (*config.Config, string) {
 		CertPath:            "temp/certificate/PID-DS-0002.cert.der",
 		CountryCode:         "LV",
 		AllowedDoctypes:     map[string]bool{"PID": true, "MDL": true},
+		BackendType:         "local",
 	}
 
-	return cfg, tempDir
+	stor, err := storage.NewStorage(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
+	}
+
+	return cfg, tempDir, stor
 }
 
 func createTestStatusFile(t *testing.T, basePath, country, doctype, rand, fileName, content string) {
@@ -65,10 +72,10 @@ func createTestStatusFile(t *testing.T, basePath, country, doctype, rand, fileNa
 }
 
 func TestServeStatusList(t *testing.T) {
-	cfg, tempDir := setupTestConfig(t)
+	cfg, tempDir, stor := setupTestConfig(t)
 	defer os.RemoveAll(tempDir)
 
-	handler := NewStatusListHandler(cfg)
+	handler := NewStatusListHandler(cfg, stor)
 
 	// Create test files
 	jwtContent := "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdGF0dXNfbGlzdCI6ImVOcnN6ZyJ9.test-signature"
@@ -268,10 +275,10 @@ func TestServeStatusList(t *testing.T) {
 }
 
 func TestServeStatusListResponseHeaders(t *testing.T) {
-	cfg, tempDir := setupTestConfig(t)
+	cfg, tempDir, stor := setupTestConfig(t)
 	defer os.RemoveAll(tempDir)
 
-	handler := NewStatusListHandler(cfg)
+	handler := NewStatusListHandler(cfg, stor)
 
 	// Create test file
 	content := "test-jwt-content"
@@ -299,10 +306,10 @@ func TestServeStatusListResponseHeaders(t *testing.T) {
 }
 
 func TestServeStatusListFileSystemErrors(t *testing.T) {
-	cfg, tempDir := setupTestConfig(t)
+	cfg, tempDir, stor := setupTestConfig(t)
 	defer os.RemoveAll(tempDir)
 
-	handler := NewStatusListHandler(cfg)
+	handler := NewStatusListHandler(cfg, stor)
 
 	t.Run("file not found scenario", func(t *testing.T) {
 		// Test the file not found path explicitly
@@ -328,10 +335,10 @@ func TestServeStatusListFileSystemErrors(t *testing.T) {
 }
 
 func TestServeStatusListPathParsing(t *testing.T) {
-	cfg, tempDir := setupTestConfig(t)
+	cfg, tempDir, stor := setupTestConfig(t)
 	defer os.RemoveAll(tempDir)
 
-	handler := NewStatusListHandler(cfg)
+	handler := NewStatusListHandler(cfg, stor)
 
 	// Test various edge cases in path parsing
 	pathTests := []struct {
@@ -393,10 +400,10 @@ func TestServeStatusListPathParsing(t *testing.T) {
 }
 
 func TestServeStatusListContentNegotiation(t *testing.T) {
-	cfg, tempDir := setupTestConfig(t)
+	cfg, tempDir, stor := setupTestConfig(t)
 	defer os.RemoveAll(tempDir)
 
-	handler := NewStatusListHandler(cfg)
+	handler := NewStatusListHandler(cfg, stor)
 
 	// Create both JWT and CWT files
 	jwtContent := "jwt-content"
@@ -483,10 +490,10 @@ func TestServeStatusListContentNegotiation(t *testing.T) {
 }
 
 func TestServeStatusListMissingFiles(t *testing.T) {
-	cfg, tempDir := setupTestConfig(t)
+	cfg, tempDir, stor := setupTestConfig(t)
 	defer os.RemoveAll(tempDir)
 
-	handler := NewStatusListHandler(cfg)
+	handler := NewStatusListHandler(cfg, stor)
 
 	// Only create JWT file, not CWT
 	jwtContent := "jwt-content"
