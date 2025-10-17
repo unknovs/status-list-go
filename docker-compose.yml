@@ -42,10 +42,33 @@ services:
       retries: 3
       start_period: 40s
 
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      BUCKET_NAME: status-lists
+    volumes:
+      - minio_data:/data
+    command: >
+      sh -c "
+      minio server /data --console-address :9001 &
+      sleep 5
+      mc alias set local http://localhost:9000 \$MINIO_ACCESS_KEY \$MINIO_SECRET_KEY
+      mc mb local/\$BUCKET_NAME
+      wait
+      "
+    restart: unless-stopped
+
 volumes:
   status_lists_data:
     driver: local
   backup_data:
     driver: local
   log_data:
+    driver: local
+  minio_data:
     driver: local
