@@ -95,8 +95,16 @@ func Load() (*Config, error) {
 
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
+		// Check if it's a file path (Docker secrets, Kubernetes secrets, etc.)
+		if strings.HasPrefix(value, "/") {
+			if data, err := os.ReadFile(value); err == nil {
+				return strings.TrimSpace(string(data))
+			}
+			// If file doesn't exist or can't be read, treat as regular value
+		}
 		return value
 	}
+	// Fall back to default value if environment variable is not set or empty
 	return defaultValue
 }
 
