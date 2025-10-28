@@ -50,6 +50,14 @@ jobs:
           
           # Convert certificate to DER format (as expected by some tests, e.g., PID-DS-0002.cert.der)
           openssl x509 -in temp/certificate/certificate.pem -outform der -out temp/certificate/PID-DS-0002.cert.der
+          
+          # Create missing test files expected by some tests
+          cp temp/private_key/private-key.pem /tmp/test.key
+          cp temp/certificate/certificate.pem /tmp/test.cert
+          
+          # Create directories required by config tests
+          sudo mkdir -p /var/opt/status_lists /var/opt/status_list_backup /tmp/status_lists
+          sudo chmod 777 /var/opt/status_lists /var/opt/status_list_backup /tmp/status_lists
 
       - name: Run vet
         run: go vet ./...
