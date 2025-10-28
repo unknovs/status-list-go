@@ -57,7 +57,7 @@ jobs:
           
           # Create directories required by config tests
           sudo mkdir -p /var/opt/status_lists /var/opt/status_list_backup /var/status_lists /tmp/status_lists
-          sudo chmod 777 /var/opt/status_lists /var/opt/status_list_backup /var/status_lists /tmp/status_lists
+          sudo chmod 755 /var/opt/status_lists /var/opt/status_list_backup /var/status_lists /tmp/status_lists
 
       - name: Run vet
         run: go vet ./...
