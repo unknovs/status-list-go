@@ -360,7 +360,7 @@ func TestMain_ConfigLoadFailure(t *testing.T) {
 		// Since main() calls log.Fatalf on config load failure, test in subprocess
 		if os.Getenv("TEST_MAIN_CONFIG_FAIL") == "1" {
 			// Set an invalid directory that should cause config.Load() to fail
-			os.Setenv("STATUS_LIST_DIR", "C:\\Windows\\System32\\invalid_test_directory_12345")
+			os.Setenv("STATUS_LIST_DIR", "/dev/null/invalid_directory")
 			os.Args = []string{"status-list-go"}
 			main()
 			return
@@ -394,8 +394,8 @@ func TestMain_ConfigLoadFailure(t *testing.T) {
 
 		// Check that the output contains config failure message or indicates server start
 		outputStr := string(output)
-		if !strings.Contains(outputStr, "Failed to load configuration") && !strings.Contains(outputStr, "Starting server") {
-			t.Errorf("Expected 'Failed to load configuration' or 'Starting server' in output, got: %s", outputStr)
+		if !strings.Contains(outputStr, "Failed to load configuration") && !strings.Contains(outputStr, "Starting Status List Service") {
+			t.Errorf("Expected 'Failed to load configuration' or 'Starting Status List Service' in output, got: %s", outputStr)
 		}
 	})
 }

@@ -56,8 +56,8 @@ func setupTestEnvironment(t *testing.T) (string, string, *config.Config, storage
 		StatusListDir:       statusListDir,
 		BackupDir:           backupDir,
 		CountryCode:         "US",
-		PrivKeyPath:         "/tmp/test.key", // These won't exist, but methods won't be called
-		CertPath:            "/tmp/test.cert",
+		PrivKeyPath:         "temp/private_key/private-key.pem", // Use CI-generated paths
+		CertPath:            "temp/certificate/certificate.pem",
 		BackendType:         "local",
 		TokenStatusListSize: 100,
 		AllowedDoctypes:     map[string]bool{"test": true},
@@ -353,8 +353,8 @@ func TestRenewListsWalkErrors(t *testing.T) {
 					StatusListDir: statusListDir,
 					BackupDir:     backupDir,
 					CountryCode:   "US",
-					PrivKeyPath:   "/tmp/test.key",
-					CertPath:      "/tmp/test.cert",
+					PrivKeyPath:   "temp/private_key/private-key.pem",
+					CertPath:      "temp/certificate/certificate.pem",
 				}
 			},
 			wantErr: false, // Changed to false as Windows may not respect directory permissions
@@ -377,8 +377,8 @@ func TestRenewListsWalkErrors(t *testing.T) {
 					StatusListDir: statusListDir,
 					BackupDir:     backupDir,
 					CountryCode:   "US",
-					PrivKeyPath:   "/tmp/test.key",
-					CertPath:      "/tmp/test.cert",
+					PrivKeyPath:   "temp/private_key/private-key.pem",
+					CertPath:      "temp/certificate/certificate.pem",
 				}
 			},
 			wantErr: false, // Should handle gracefully
