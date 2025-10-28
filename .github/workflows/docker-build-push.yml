@@ -12,7 +12,7 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: oauth-oidc-mock-service
+  IMAGE_NAME: status-list-go
 
 jobs:
   build-and-push:
