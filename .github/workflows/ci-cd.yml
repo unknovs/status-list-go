@@ -38,6 +38,22 @@ jobs:
       - name: Verify dependencies
         run: go mod verify
 
+      - name: Generate test certificates
+        run: |
+          mkdir -p temp/certificate temp/private_key
+          
+          # Generate encrypted ECDSA private key (P-256, as used in the code)
+          openssl ecparam -name prime256v1 -genkey -aes256 -out temp/private_key/encrypted_key.pem -passout pass:testpass
+          
+          # Decrypt the private key to the expected filename
+          openssl ec -in temp/private_key/encrypted_key.pem -passin pass:testpass -out temp/private_key/private-key.pem
+          
+          # Generate self-signed certificate (PEM format)
+          openssl req -new -x509 -key temp/private_key/private-key.pem -out temp/certificate/certificate.pem -days 365 -subj "/C=LV/O=Test/CN=status-list-test"
+          
+          # Convert certificate to DER format (as expected by some tests, e.g., PID-DS-0002.cert.der)
+          openssl x509 -in temp/certificate/certificate.pem -outform der -out temp/certificate/PID-DS-0002.cert.der
+
       - name: Run vet
         run: go vet ./...
 
