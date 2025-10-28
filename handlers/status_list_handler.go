@@ -31,6 +31,11 @@ import (
 	"github.com/unknovs/status-list-go/services/storage"
 )
 
+const (
+	APIKeyHeader      = "X-Api-Key"
+	ContentTypeHeader = "Content-Type"
+)
+
 // StatusListHandler handles status list related requests
 type StatusListHandler struct {
 	config      *config.Config
@@ -75,14 +80,14 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 	safeHeaders := make(map[string][]string)
 	for k, v := range r.Header {
 		// Skip sensitive headers
-		if k != "X-Api-Key" && k != "Authorization" {
+		if k != APIKeyHeader && k != "Authorization" {
 			safeHeaders[k] = v
 		}
 	}
 	log.Printf("Take Request, headers: %v, form: %v", safeHeaders, r.Form)
 
 	// Validate API key
-	apiKey := r.Header.Get("X-Api-Key")
+	apiKey := r.Header.Get(APIKeyHeader)
 	if apiKey != h.config.APIKey {
 		log.Printf("Authentication failed: incorrect API key provided")
 		WriteError(w, http.StatusUnauthorized, ErrInvalidAPIKey)
@@ -92,7 +97,7 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 	// Validate doctype
 	doctype := r.FormValue("doctype")
 	if !h.config.ValidateDoctype(doctype) {
-		log.Printf("Invalid document type: %s", doctype)
+		log.Printf("Invalid document type provided")
 		WriteError(w, http.StatusBadRequest, ErrInvalidDoctype)
 		return
 	}
@@ -100,7 +105,7 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 	// Validate country
 	country := r.FormValue("country")
 	if !h.config.ValidateCountry(country) {
-		log.Printf("Invalid country: %s", country)
+		log.Printf("Invalid country provided")
 		WriteError(w, http.StatusBadRequest, ErrInvalidCountry)
 		return
 	}
@@ -108,7 +113,7 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 	// Validate expiry date
 	expiryDate := r.FormValue("expiry_date")
 	if err := h.validateExpiryDate(expiryDate); err != nil {
-		log.Printf("Invalid expiry date: %s, error: %v", expiryDate, err)
+		log.Printf("Invalid expiry date provided, error: %v", err)
 		WriteError(w, http.StatusBadRequest, ErrInvalidExpiryDate)
 		return
 	}
@@ -180,7 +185,7 @@ func (h *StatusListHandler) GetIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set(ContentTypeHeader, "text/plain")
 	fmt.Fprintf(w, "%d", status)
 }
 
@@ -212,7 +217,7 @@ func (h *StatusListHandler) SetIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate API key
-	apiKey := r.Header.Get("X-Api-Key")
+	apiKey := r.Header.Get(APIKeyHeader)
 	if apiKey != h.config.APIKey {
 		WriteError(w, http.StatusUnauthorized, ErrUnauthorizedAccess)
 		return
@@ -271,13 +276,13 @@ func (h *StatusListHandler) SetIndex(w http.ResponseWriter, r *http.Request) {
 
 	// Validate extracted values
 	if !h.config.ValidateCountry(country) {
-		log.Printf("Invalid country from URI: %s", country)
+		log.Printf("Invalid country from URI provided")
 		WriteError(w, http.StatusBadRequest, ErrInvalidCountry)
 		return
 	}
 
 	if !h.config.ValidateDoctype(doctype) {
-		log.Printf("Invalid doctype from URI: %s", doctype)
+		log.Printf("Invalid doctype from URI provided")
 		WriteError(w, http.StatusBadRequest, ErrInvalidDoctype)
 		return
 	}
@@ -290,13 +295,13 @@ func (h *StatusListHandler) SetIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set(ContentTypeHeader, "text/plain")
 	fmt.Fprintf(w, "Status Changed\n")
 }
 
 // Helper methods for JSON responses
 func (h *StatusListHandler) writeJSON(w http.ResponseWriter, statusCode int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(ContentTypeHeader, "application/json")
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(data)
 }

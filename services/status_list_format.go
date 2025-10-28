@@ -23,6 +23,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -33,6 +34,18 @@ import (
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/models"
 	"github.com/veraison/go-cose"
+)
+
+var (
+	ErrServiceURLEmpty = errors.New("ServiceURL is empty")
+)
+
+const (
+	ErrCountryNotSupportedFormat = "country not supported: %s (expected: %s)"
+	ErrLoadPrivateKeyFormat      = "failed to load private key: %v"
+	ErrLoadCertificateFormat     = "failed to load certificate: %v"
+	ErrEncodeCWTFormat           = "failed to encode CWT: %v"
+	ErrSignCWTFormat             = "failed to sign CWT: %v"
 )
 
 // CWTClaims represents the CBOR Web Token claims for status list
@@ -76,7 +89,7 @@ func NewStatusListFormatter(cfg *config.Config) *StatusListFormatter {
 func (f *StatusListFormatter) GenerateJWT(tokenStatusList *models.IssuerStatusList, country, listURL string) (string, error) {
 	// Validate country matches configuration
 	if !f.config.ValidateCountry(country) {
-		return "", fmt.Errorf("country not supported: %s (expected: %s)", country, f.config.CountryCode)
+		return "", fmt.Errorf(ErrCountryNotSupportedFormat, country, f.config.CountryCode)
 	}
 
 	// Get certificate paths
@@ -85,13 +98,13 @@ func (f *StatusListFormatter) GenerateJWT(tokenStatusList *models.IssuerStatusLi
 	// Load private key
 	privateKey, err := f.loadPrivateKey(privKeyPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to load private key: %v", err)
+		return "", fmt.Errorf(ErrLoadPrivateKeyFormat, err)
 	}
 
 	// Load certificate
 	cert, err := f.loadCertificate(certPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to load certificate: %v", err)
+		return "", fmt.Errorf(ErrLoadCertificateFormat, err)
 	}
 
 	// Create JWT claims
@@ -126,13 +139,13 @@ func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusLi
 	// Load private key
 	privateKey, err := f.loadPrivateKey(privKeyPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to load private key: %v", err)
+		return "", fmt.Errorf(ErrLoadPrivateKeyFormat, err)
 	}
 
 	// Load certificate
 	cert, err := f.loadCertificate(certPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to load certificate: %v", err)
+		return "", fmt.Errorf(ErrLoadCertificateFormat, err)
 	}
 
 	// Create CWT claims using numeric keys as per RFC 8392
@@ -141,7 +154,7 @@ func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusLi
 	// Safely handle ServiceURL
 	issuer := f.config.ServiceURL
 	if issuer == "" {
-		return "", fmt.Errorf("ServiceURL is empty")
+		return "", ErrServiceURLEmpty
 	}
 	issuer = strings.TrimSuffix(issuer, "/")
 
@@ -159,7 +172,7 @@ func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusLi
 	// Encode claims to CBOR
 	claimsData, err := cbor.Marshal(claims)
 	if err != nil {
-		return "", fmt.Errorf("failed to encode CWT: %v", err)
+		return "", fmt.Errorf(ErrEncodeCWTFormat, err)
 	}
 
 	// Create COSE Sign1 message
@@ -178,7 +191,7 @@ func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusLi
 	// Create COSE signer
 	signer, err := cose.NewSigner(cose.AlgorithmES256, privateKey)
 	if err != nil {
-		return "", fmt.Errorf("failed to sign CWT: %v", err)
+		return "", fmt.Errorf(ErrSignCWTFormat, err)
 	}
 
 	// Create and sign the COSE Sign1 message
@@ -190,13 +203,13 @@ func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusLi
 	// Use crypto/rand.Reader for randomness source and empty external AAD
 	err = msg.Sign(rand.Reader, []byte{}, signer)
 	if err != nil {
-		return "", fmt.Errorf("failed to sign CWT: %v", err)
+		return "", fmt.Errorf(ErrSignCWTFormat, err)
 	}
 
 	// Encode to CBOR
 	cwtData, err := cbor.Marshal(msg)
 	if err != nil {
-		return "", fmt.Errorf("failed to encode CWT: %v", err)
+		return "", fmt.Errorf(ErrEncodeCWTFormat, err)
 	}
 
 	// Return hex encoded CWT to match the expected format
@@ -207,7 +220,7 @@ func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusLi
 func (f *StatusListFormatter) GenerateIdentifierJWT(identifierList map[string]int, country, listURL string) (string, error) {
 	// Validate country matches configuration
 	if !f.config.ValidateCountry(country) {
-		return "", fmt.Errorf("country not supported: %s (expected: %s)", country, f.config.CountryCode)
+		return "", fmt.Errorf(ErrCountryNotSupportedFormat, country, f.config.CountryCode)
 	}
 
 	// Get certificate paths
@@ -216,19 +229,19 @@ func (f *StatusListFormatter) GenerateIdentifierJWT(identifierList map[string]in
 	// Load private key
 	privateKey, err := f.loadPrivateKey(privKeyPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to load private key: %v", err)
+		return "", fmt.Errorf(ErrLoadPrivateKeyFormat, err)
 	}
 
 	// Load certificate
 	cert, err := f.loadCertificate(certPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to load certificate: %v", err)
+		return "", fmt.Errorf(ErrLoadCertificateFormat, err)
 	}
 
 	// Create JWT claims
 	issuer := f.config.ServiceURL
 	if issuer == "" {
-		return "", fmt.Errorf("ServiceURL is empty")
+		return "", ErrServiceURLEmpty
 	}
 	issuer = strings.TrimSuffix(issuer, "/")
 
@@ -257,7 +270,7 @@ func (f *StatusListFormatter) GenerateIdentifierJWT(identifierList map[string]in
 func (f *StatusListFormatter) GenerateIdentifierCWT(identifierList map[string]int, country, listURL string) (string, error) {
 	// Validate country matches configuration
 	if !f.config.ValidateCountry(country) {
-		return "", fmt.Errorf("country not supported: %s (expected: %s)", country, f.config.CountryCode)
+		return "", fmt.Errorf(ErrCountryNotSupportedFormat, country, f.config.CountryCode)
 	}
 
 	// Get certificate paths
@@ -266,13 +279,13 @@ func (f *StatusListFormatter) GenerateIdentifierCWT(identifierList map[string]in
 	// Load private key
 	privateKey, err := f.loadPrivateKey(privKeyPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to load private key: %v", err)
+		return "", fmt.Errorf(ErrLoadPrivateKeyFormat, err)
 	}
 
 	// Load certificate
 	cert, err := f.loadCertificate(certPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to load certificate: %v", err)
+		return "", fmt.Errorf(ErrLoadCertificateFormat, err)
 	}
 
 	// Create CWT claims for identifier list
@@ -282,7 +295,7 @@ func (f *StatusListFormatter) GenerateIdentifierCWT(identifierList map[string]in
 	// Safely handle ServiceURL
 	issuer := f.config.ServiceURL
 	if issuer == "" {
-		return "", fmt.Errorf("ServiceURL is empty")
+		return "", ErrServiceURLEmpty
 	}
 	issuer = strings.TrimSuffix(issuer, "/")
 
@@ -299,7 +312,7 @@ func (f *StatusListFormatter) GenerateIdentifierCWT(identifierList map[string]in
 	// Encode claims to CBOR
 	claimsData, err := cbor.Marshal(claims)
 	if err != nil {
-		return "", fmt.Errorf("failed to encode CWT: %v", err)
+		return "", fmt.Errorf(ErrEncodeCWTFormat, err)
 	}
 
 	// Create COSE Sign1 message
@@ -319,7 +332,7 @@ func (f *StatusListFormatter) GenerateIdentifierCWT(identifierList map[string]in
 	// Create COSE signer
 	signer, err := cose.NewSigner(cose.AlgorithmES256, privateKey)
 	if err != nil {
-		return "", fmt.Errorf("failed to sign CWT: %v", err)
+		return "", fmt.Errorf(ErrSignCWTFormat, err)
 	}
 
 	// Create and sign the COSE Sign1 message
@@ -331,13 +344,13 @@ func (f *StatusListFormatter) GenerateIdentifierCWT(identifierList map[string]in
 	// Use crypto/rand.Reader for randomness source and empty external AAD
 	err = msg.Sign(rand.Reader, []byte{}, signer)
 	if err != nil {
-		return "", fmt.Errorf("failed to sign CWT: %v", err)
+		return "", fmt.Errorf(ErrSignCWTFormat, err)
 	}
 
 	// Encode to CBOR
 	cwtData, err := cbor.Marshal(msg)
 	if err != nil {
-		return "", fmt.Errorf("failed to encode CWT: %v", err)
+		return "", fmt.Errorf(ErrEncodeCWTFormat, err)
 	}
 
 	// Return hex encoded CWT to match the expected format

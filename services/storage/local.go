@@ -9,6 +9,10 @@ import (
 	"strings"
 )
 
+const (
+	VersionFileSuffix = ".version"
+)
+
 // LocalStorage implements the Storage interface using the local filesystem.
 type LocalStorage struct {
 	StatusListDir string
@@ -47,7 +51,7 @@ func (ls *LocalStorage) Create(path string, content []byte) error {
 	}
 
 	// Initialize version metadata
-	versionPath := fullPath + ".version"
+	versionPath := fullPath + VersionFileSuffix
 	if err := os.WriteFile(versionPath, []byte("1"), 0644); err != nil {
 		return fmt.Errorf("failed to create version metadata: %w", err)
 	}
@@ -75,7 +79,7 @@ func (ls *LocalStorage) Read(path string) ([]byte, error) {
 // Uses atomic write (temp file + rename) to prevent partial writes.
 func (ls *LocalStorage) Write(path string, content []byte, version int) error {
 	fullPath := filepath.Join(ls.StatusListDir, path)
-	versionPath := fullPath + ".version"
+	versionPath := fullPath + VersionFileSuffix
 
 	// Check current version
 	currentVersion, err := ls.GetVersion(path)
@@ -136,7 +140,7 @@ func (ls *LocalStorage) List(prefix string) ([]string, error) {
 		}
 
 		// Skip directories and version metadata files
-		if info.IsDir() || strings.HasSuffix(path, ".version") {
+		if info.IsDir() || strings.HasSuffix(path, VersionFileSuffix) {
 			return nil
 		}
 
@@ -167,7 +171,7 @@ func (ls *LocalStorage) List(prefix string) ([]string, error) {
 // GetVersion reads the current version of a file from its metadata.
 func (ls *LocalStorage) GetVersion(path string) (int, error) {
 	fullPath := filepath.Join(ls.StatusListDir, path)
-	versionPath := fullPath + ".version"
+	versionPath := fullPath + VersionFileSuffix
 
 	data, err := os.ReadFile(versionPath)
 	if err != nil {

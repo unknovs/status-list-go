@@ -33,6 +33,10 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	FullListJSONFile = "full_list.json"
+)
+
 // ListManager manages status lists and identifier lists
 type ListManager struct {
 	config     *config.Config
@@ -90,8 +94,8 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 	}
 
 	// Define file paths
-	tokenJSONPath := filepath.Join("token_status_list", country, doctype, rand, "full_list.json")
-	identifierJSONPath := filepath.Join("identifier_list", country, doctype, rand, "full_list.json")
+	tokenJSONPath := filepath.Join("token_status_list", country, doctype, rand, FullListJSONFile)
+	identifierJSONPath := filepath.Join("identifier_list", country, doctype, rand, FullListJSONFile)
 
 	// Use storage interface to write files
 	// Check if files exist, create or write accordingly
@@ -219,7 +223,7 @@ func (lm *ListManager) LoadList(uri string) (*models.StatusListData, error) {
 
 	// Construct path relative to storage root (remove leading slash)
 	relativePath := strings.TrimPrefix(parsedURI.Path, "/")
-	folderPath := filepath.Join(relativePath, "full_list.json")
+	folderPath := filepath.Join(relativePath, FullListJSONFile)
 
 	jsonData, err := lm.storage.Read(folderPath)
 	if err != nil {

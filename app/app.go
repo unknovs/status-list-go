@@ -30,6 +30,10 @@ import (
 	"github.com/unknovs/status-list-go/services/storage"
 )
 
+const (
+	ContentTypeHeader = "Content-Type"
+)
+
 // App represents the application
 type App struct {
 	config  *config.Config
@@ -194,7 +198,7 @@ func (a *App) setupRoutes() {
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Expires", "0")
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(ContentTypeHeader, "application/json")
 		w.Write(modifiedSwagger)
 	})
 
@@ -220,13 +224,13 @@ func (a *App) setupRoutes() {
     </script>
 </body>
 </html>`
-		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set(ContentTypeHeader, "text/html")
 		w.Write([]byte(swaggerHTML))
 	})
 
 	// Health check
 	a.mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(ContentTypeHeader, "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
 	})
 }

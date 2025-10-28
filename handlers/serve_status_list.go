@@ -23,6 +23,10 @@ import (
 	"strings"
 )
 
+const (
+	StatusListJWTContentType = "application/statuslist+jwt"
+)
+
 // ServeStatusList serves the status list JWT file for a given country, doctype, and id (rand)
 func (h *StatusListHandler) ServeStatusList(w http.ResponseWriter, r *http.Request) {
 	// Only allow GET method
@@ -52,13 +56,13 @@ func (h *StatusListHandler) ServeStatusList(w http.ResponseWriter, r *http.Reque
 	// Content negotiation - support both JWT and CWT
 	accept := r.Header.Get("Accept")
 	if accept == "" || accept == "*/*" {
-		accept = "application/statuslist+jwt" // Default to JWT
+		accept = StatusListJWTContentType // Default to JWT
 	}
 
 	var contentType, fileName string
 	switch accept {
-	case "application/statuslist+jwt":
-		contentType = "application/statuslist+jwt"
+	case StatusListJWTContentType:
+		contentType = StatusListJWTContentType
 		fileName = "token_status_list.jwt"
 	case "application/statuslist+cwt":
 		contentType = "application/statuslist+cwt"
