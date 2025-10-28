@@ -19,6 +19,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,21 +27,31 @@ import (
 
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/handlers"
+	"github.com/unknovs/status-list-go/services/storage"
 )
 
 // App represents the application
 type App struct {
-	config *config.Config
-	mux    *http.ServeMux
+	config  *config.Config
+	mux     *http.ServeMux
+	storage storage.Storage
 }
 
 // NewApp creates a new application instance
 func NewApp(cfg *config.Config) *App {
 	mux := http.NewServeMux()
 
+	// Initialize storage backend
+	stor, err := storage.NewStorage(cfg)
+	if err != nil {
+		log.Fatalf("Failed to initialize storage backend: %v", err)
+	}
+	log.Printf("Initialized storage backend: %s", cfg.BackendType)
+
 	app := &App{
-		config: cfg,
-		mux:    mux,
+		config:  cfg,
+		mux:     mux,
+		storage: stor,
 	}
 
 	app.setupRoutes()
@@ -49,8 +60,8 @@ func NewApp(cfg *config.Config) *App {
 
 // setupRoutes configures all application routes
 func (a *App) setupRoutes() {
-	// Create handlers
-	statusHandler := handlers.NewStatusListHandler(a.config)
+	// Create handlers with storage backend
+	statusHandler := handlers.NewStatusListHandler(a.config, a.storage)
 
 	// API routes
 	a.mux.HandleFunc("/token_status_list/take", statusHandler.TakeIndex)

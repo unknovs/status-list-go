@@ -3,3 +3,13 @@ temp/
 *.log
 RCA.md
 .env*
+
+# Go build artifacts
+*.test
+*.out
+vendor/
+
+# IDE and OS
+.DS_Store
+Thumbs.db
+*.swp

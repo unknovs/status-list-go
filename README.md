@@ -116,6 +116,117 @@ openssl pkey -in decrypted-key.pem -text -noout
    - Confirm the private key and certificate are from the same key pair
    - Verify the certificate is valid and not expired
 
+## Storage Backend Configuration
+
+The Status List service supports pluggable storage backends for horizontal scaling and flexibility.
+
+### Available Storage Backends
+
+#### 1. Local Filesystem (Default)
+
+The default storage backend uses the local filesystem. This is suitable for:
+- Development and testing
+- Single-instance deployments
+- Environments where shared storage is not required
+
+**Configuration:**
+
+```bash
+# Local storage is the default - no additional configuration needed
+STATUS_LIST_STORAGE=local  # Optional, defaults to "local"
+STATUS_LIST_DIR=/var/opt/status_lists
+BACKUP_DIR=/var/opt/status_list_backup
+LOG_DIR=/tmp/status_lists
+```
+
+#### 2. S3 / S3-Compatible Storage
+
+For production deployments requiring horizontal scaling with multiple service instances, use S3 or S3-compatible storage (MinIO, LocalStack, etc.).
+
+**Configuration:**
+
+```bash
+# S3 Storage Backend
+STATUS_LIST_STORAGE=s3
+S3_BUCKET=status-lists
+S3_REGION=us-east-1  # Optional for S3-compatible services
+S3_ACCESS_KEY_ID=your-access-key
+S3_SECRET_ACCESS_KEY=your-secret-key
+S3_ENDPOINT=http://localhost:9000  # Optional: for MinIO or other S3-compatible services
+```
+
+**AWS S3 Example:**
+
+```bash
+STATUS_LIST_STORAGE=s3
+S3_BUCKET=my-status-lists-bucket
+S3_REGION=eu-west-1
+S3_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+S3_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+```
+
+**MinIO Example (Local Development):**
+
+```bash
+STATUS_LIST_STORAGE=s3
+S3_BUCKET=status-lists
+S3_ENDPOINT=http://minio:9000
+S3_ACCESS_KEY_ID=minioadmin
+S3_SECRET_ACCESS_KEY=minioadmin
+S3_REGION=us-east-1
+```
+
+### Docker Compose with S3 Storage
+
+The included `docker-compose.yml` provides a complete setup with MinIO for local S3 testing:
+
+```yaml
+# Start with MinIO S3 storage
+docker-compose up -d
+
+# The minio-init service automatically creates the required bucket
+# MinIO console available at: http://localhost:9001
+```
+
+To enable S3 storage in the service, uncomment the S3 environment variables in `docker-compose.yml`:
+
+```yaml
+environment:
+  STATUS_LIST_STORAGE: "s3"
+  S3_BUCKET: "status-lists"
+  S3_ENDPOINT: "http://minio:9000"
+  S3_ACCESS_KEY_ID: "minioadmin"
+  S3_SECRET_ACCESS_KEY: "minioadmin"
+  S3_REGION: "us-east-1"
+```
+
+### Storage Features
+
+- **Optimistic Locking**: Version-based concurrency control prevents data corruption
+- **Atomic Operations**: All write operations are atomic (local: temp file + rename, S3: object metadata versioning)
+- **Automatic Retry**: AWS SDK built-in exponential backoff for transient failures
+- **Connection Validation**: S3 bucket accessibility is validated at startup
+
+### Multi-Instance Deployment
+
+When using S3 storage, multiple service instances can share the same bucket:
+
+```bash
+# Instance A
+docker run -d -p 8080:8080 \
+  -e STATUS_LIST_STORAGE=s3 \
+  -e S3_BUCKET=shared-status-lists \
+  statuslist-service
+
+# Instance B (different port)
+docker run -d -p 8081:8080 \
+  -e STATUS_LIST_STORAGE=s3 \
+  -e S3_BUCKET=shared-status-lists \
+  statuslist-service
+```
+
+Both instances will read and write to the same S3 bucket, enabling horizontal scaling.
+
 ## Swagger
 
 ```sh
@@ -125,6 +236,7 @@ HOST{/token_status_list/swagger}
 ## Features
 
 - Supports Attestation Status List (ASL) [draft-ietf-oauth-status-list-02](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-status-list-02)
+  * need to check diferences with draft v12
 - Supports Attestation Revocation List (ARL) [ ISO/IEC CD 18013-5 second edition ]
 
 ## How to contribute

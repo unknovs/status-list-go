@@ -1,0 +1,591 @@
+/*
+Copyright (c) Gatis Beikerts
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package services
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/unknovs/status-list-go/config"
+	"github.com/unknovs/status-list-go/models"
+)
+
+// MockStorage implements the Storage interface for testing
+type MockStorage struct {
+	files   map[string][]byte
+	mutex   sync.RWMutex
+	version map[string]int
+}
+
+func NewMockStorage() *MockStorage {
+	return &MockStorage{
+		files:   make(map[string][]byte),
+		version: make(map[string]int),
+	}
+}
+
+func (m *MockStorage) Create(path string, content []byte) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	// Normalize path to use forward slashes
+	path = strings.ReplaceAll(path, "\\", "/")
+
+	if _, exists := m.files[path]; exists {
+		return fmt.Errorf("file already exists: %s", path)
+	}
+
+	m.files[path] = content
+	m.version[path] = 1
+	return nil
+}
+
+func (m *MockStorage) Read(path string) ([]byte, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	// Normalize path to use forward slashes
+	path = strings.ReplaceAll(path, "\\", "/")
+
+	content, exists := m.files[path]
+	if !exists {
+		return nil, fmt.Errorf("file not found: %s", path)
+	}
+
+	return content, nil
+}
+
+func (m *MockStorage) Write(path string, content []byte, version int) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	// Normalize path to use forward slashes
+	path = strings.ReplaceAll(path, "\\", "/")
+
+	if _, exists := m.files[path]; !exists {
+		return fmt.Errorf("file not found: %s", path)
+	}
+
+	// For testing, don't check version
+	m.files[path] = content
+	m.version[path] = version + 1
+	return nil
+}
+
+func (m *MockStorage) Exists(path string) (bool, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	// Normalize path to use forward slashes
+	path = strings.ReplaceAll(path, "\\", "/")
+
+	_, exists := m.files[path]
+	return exists, nil
+}
+
+func (m *MockStorage) List(prefix string) ([]string, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	// Normalize prefix to use forward slashes
+	prefix = strings.ReplaceAll(prefix, "\\", "/")
+
+	var paths []string
+	for path := range m.files {
+		// Paths are already normalized in storage
+		if prefix == "" || strings.HasPrefix(path, prefix) {
+			paths = append(paths, path)
+		}
+	}
+
+	return paths, nil
+}
+
+func (m *MockStorage) GetVersion(path string) (int, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	// Normalize path to use forward slashes
+	path = strings.ReplaceAll(path, "\\", "/")
+
+	version, exists := m.version[path]
+	if !exists {
+		return 0, fmt.Errorf("file not found: %s", path)
+	}
+
+	return version, nil
+}
+
+// TestNewListManager tests the creation of a new ListManager
+func TestNewListManager(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 100,
+	}
+	storage := NewMockStorage()
+
+	lm := NewListManager(cfg, storage)
+
+	if lm == nil {
+		t.Fatal("Expected ListManager to be created, got nil")
+	}
+
+	if lm.config != cfg {
+		t.Error("Config not set correctly")
+	}
+
+	if lm.storage != storage {
+		t.Error("Storage not set correctly")
+	}
+
+	if lm.statusList == nil {
+		t.Error("Status list map should be initialized")
+	}
+}
+
+// TestNewList tests creating a new status list
+func TestNewList(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 100,
+	}
+	storage := NewMockStorage()
+	lm := NewListManager(cfg, storage)
+
+	country := "DE"
+	doctype := "mDL"
+
+	lm.NewList(country, doctype)
+
+	if lm.statusList[country] == nil {
+		t.Fatal("Country entry not created")
+	}
+
+	if lm.statusList[country][doctype] == nil {
+		t.Fatal("Doctype entry not created")
+	}
+
+	statusData := lm.statusList[country][doctype]
+	if statusData.TokenStatusList == nil {
+		t.Error("TokenStatusList not initialized")
+	}
+
+	if statusData.IdentifierList == nil {
+		t.Error("IdentifierList not initialized")
+	}
+
+	if statusData.Rand == "" {
+		t.Error("Rand should be set")
+	}
+}
+
+// TestDumpList tests saving a status list to storage
+func TestDumpList(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 100,
+		PrivKeyPath:         "",
+		CertPath:            "",
+		CountryCode:         "DE",
+	}
+	storage := NewMockStorage()
+	lm := NewListManager(cfg, storage)
+
+	country := "DE"
+	doctype := "mDL"
+	lm.NewList(country, doctype)
+
+	statusData := lm.statusList[country][doctype]
+
+	err := lm.DumpList(statusData, country, doctype)
+	if err != nil {
+		t.Fatalf("DumpList failed: %v", err)
+	}
+
+	// Debug: Check what files exist in storage
+	allFiles, _ := storage.List("")
+	t.Logf("Files in storage after DumpList: %v", allFiles)
+
+	// Verify JSON files were created
+	tokenJSONPath := fmt.Sprintf("token_status_list/%s/%s/%s/full_list.json", country, doctype, statusData.Rand)
+	identifierJSONPath := fmt.Sprintf("identifier_list/%s/%s/%s/full_list.json", country, doctype, statusData.Rand)
+
+	exists, _ := storage.Exists(tokenJSONPath)
+	if !exists {
+		t.Errorf("Token JSON file not created at %s", tokenJSONPath)
+	}
+
+	exists, _ = storage.Exists(identifierJSONPath)
+	if !exists {
+		t.Errorf("Identifier JSON file not created at %s", identifierJSONPath)
+	}
+
+	// Verify content
+	content, err := storage.Read(tokenJSONPath)
+	if err != nil {
+		t.Fatalf("Failed to read token JSON: %v", err)
+	}
+
+	var loadedData models.StatusListData
+	if err := json.Unmarshal(content, &loadedData); err != nil {
+		t.Fatalf("Failed to unmarshal JSON: %v", err)
+	}
+
+	if loadedData.Country != country {
+		t.Errorf("Expected country %s, got %s", country, loadedData.Country)
+	}
+
+	if loadedData.Doctype != doctype {
+		t.Errorf("Expected doctype %s, got %s", doctype, loadedData.Doctype)
+	}
+}
+
+// TestDumpListUpdate tests updating an existing status list
+func TestDumpListUpdate(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 100,
+		PrivKeyPath:         "",
+		CertPath:            "",
+		CountryCode:         "DE",
+	}
+	storage := NewMockStorage()
+	lm := NewListManager(cfg, storage)
+
+	country := "DE"
+	doctype := "mDL"
+	lm.NewList(country, doctype)
+
+	statusData := lm.statusList[country][doctype]
+
+	// First dump
+	err := lm.DumpList(statusData, country, doctype)
+	if err != nil {
+		t.Fatalf("First DumpList failed: %v", err)
+	}
+
+	// Modify the status list
+	statusData.TokenStatusList.StatusList.Set(0, 1)
+
+	// Second dump (update)
+	err = lm.DumpList(statusData, country, doctype)
+	if err != nil {
+		t.Fatalf("Second DumpList failed: %v", err)
+	}
+
+	// Verify the update
+	tokenJSONPath := fmt.Sprintf("token_status_list/%s/%s/%s/full_list.json", country, doctype, statusData.Rand)
+	content, err := storage.Read(tokenJSONPath)
+	if err != nil {
+		t.Fatalf("Failed to read updated token JSON: %v", err)
+	}
+
+	var loadedData models.StatusListData
+	if err := json.Unmarshal(content, &loadedData); err != nil {
+		t.Fatalf("Failed to unmarshal updated JSON: %v", err)
+	}
+
+	// Verify the status was updated
+	if loadedData.TokenStatusList.StatusList.Get(0) != 1 {
+		t.Errorf("Expected status at index 0 to be 1, got %d", loadedData.TokenStatusList.StatusList.Get(0))
+	}
+}
+
+// TestLoadList tests loading a status list from storage
+func TestLoadList(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 100,
+		PrivKeyPath:         "",
+		CertPath:            "",
+		CountryCode:         "DE",
+	}
+	storage := NewMockStorage()
+	lm := NewListManager(cfg, storage)
+
+	country := "DE"
+	doctype := "mDL"
+	lm.NewList(country, doctype)
+
+	statusData := lm.statusList[country][doctype]
+
+	// Dump the list
+	err := lm.DumpList(statusData, country, doctype)
+	if err != nil {
+		t.Fatalf("DumpList failed: %v", err)
+	}
+
+	// Construct URI
+	uri := fmt.Sprintf("http://localhost:8081/token_status_list/%s/%s/%s", country, doctype, statusData.Rand)
+
+	// Load the list
+	loadedData, err := lm.LoadList(uri)
+	if err != nil {
+		t.Fatalf("LoadList failed: %v", err)
+	}
+
+	if loadedData.Country != country {
+		t.Errorf("Expected country %s, got %s", country, loadedData.Country)
+	}
+
+	if loadedData.Doctype != doctype {
+		t.Errorf("Expected doctype %s, got %s", doctype, loadedData.Doctype)
+	}
+}
+
+// TestTakeIndexList tests taking indices from a status list
+func TestTakeIndexList(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 10, // Small size for testing
+		PrivKeyPath:         "",
+		CertPath:            "",
+		CountryCode:         "DE",
+	}
+	storage := NewMockStorage()
+	lm := NewListManager(cfg, storage)
+
+	country := "DE"
+	doctype := "mDL"
+	expiryDate := "2025-12-31"
+
+	// Take first index
+	index1, err := lm.TakeIndexList(country, doctype, expiryDate)
+	if err != nil {
+		t.Fatalf("TakeIndexList failed: %v", err)
+	}
+
+	if index1 < 0 {
+		t.Errorf("Expected valid index, got %d", index1)
+	}
+
+	// Take second index
+	index2, err := lm.TakeIndexList(country, doctype, expiryDate)
+	if err != nil {
+		t.Fatalf("Second TakeIndexList failed: %v", err)
+	}
+
+	if index2 < 0 {
+		t.Errorf("Expected valid second index, got %d", index2)
+	}
+
+	// Verify indices are different
+	if index1 == index2 {
+		t.Errorf("Expected different indices, got %d and %d", index1, index2)
+	}
+
+	// Verify expiry date was set
+	statusData := lm.statusList[country][doctype]
+	if statusData.Expires == nil {
+		t.Error("Expiry date should be set")
+	} else if *statusData.Expires != expiryDate {
+		t.Errorf("Expected expiry %s, got %s", expiryDate, *statusData.Expires)
+	}
+}
+
+// TestGenerateStatusListInfo tests generating status list info
+func TestGenerateStatusListInfo(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 100,
+		PrivKeyPath:         "",
+		CertPath:            "",
+		CountryCode:         "DE",
+	}
+	storage := NewMockStorage()
+	lm := NewListManager(cfg, storage)
+
+	country := "DE"
+	doctype := "mDL"
+	expiryDate := "2025-12-31"
+
+	info, err := lm.GenerateStatusListInfo(country, doctype, expiryDate)
+	if err != nil {
+		t.Fatalf("GenerateStatusListInfo failed: %v", err)
+	}
+
+	if info == nil {
+		t.Fatal("Expected StatusListInfo, got nil")
+	}
+
+	if info.StatusList.URI == "" {
+		t.Error("StatusList URI should not be empty")
+	}
+
+	if info.StatusList.Idx < 0 {
+		t.Error("StatusList index should be valid")
+	}
+
+	if info.IdentifierList.URI == "" {
+		t.Error("IdentifierList URI should not be empty")
+	}
+
+	if info.IdentifierList.ID == "" {
+		t.Error("IdentifierList ID should not be empty")
+	}
+}
+
+// TestGetStatusFromURI tests getting status from a URI
+func TestGetStatusFromURI(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 100,
+		PrivKeyPath:         "c:\\code\\github\\gatisb\\status-list-go\\temp\\private_key\\decrypted_key.pem",
+		CertPath:            "c:\\code\\github\\gatisb\\status-list-go\\temp\\certificate\\certificate.pem",
+		CountryCode:         "DE",
+	}
+	storage := NewMockStorage()
+	lm := NewListManager(cfg, storage)
+
+	country := "DE"
+	doctype := "mDL"
+	lm.NewList(country, doctype)
+
+	statusData := lm.statusList[country][doctype]
+
+	// Set a status
+	statusData.TokenStatusList.StatusList.Set(5, 1)
+
+	// Dump the list
+	err := lm.DumpList(statusData, country, doctype)
+	if err != nil {
+		t.Fatalf("DumpList failed: %v", err)
+	}
+
+	// Construct URI
+	uri := fmt.Sprintf("http://localhost:8081/token_status_list/%s/%s/%s", country, doctype, statusData.Rand)
+
+	// Get status
+	status, err := lm.GetStatusFromURI(uri, 5)
+	if err != nil {
+		t.Fatalf("GetStatusFromURI failed: %v", err)
+	}
+
+	if status != 1 {
+		t.Errorf("Expected status 1, got %d", status)
+	}
+}
+
+// TestSetStatus tests setting a status
+func TestSetStatus(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 100,
+		PrivKeyPath:         "c:\\code\\github\\gatisb\\status-list-go\\temp\\private_key\\decrypted_key.pem",
+		CertPath:            "c:\\code\\github\\gatisb\\status-list-go\\temp\\certificate\\certificate.pem",
+		CountryCode:         "DE",
+	}
+	storage := NewMockStorage()
+	lm := NewListManager(cfg, storage)
+
+	country := "DE"
+	doctype := "mDL"
+	lm.NewList(country, doctype)
+
+	statusData := lm.statusList[country][doctype]
+	listID := statusData.Rand
+
+	// Dump the list
+	err := lm.DumpList(statusData, country, doctype)
+	if err != nil {
+		t.Fatalf("DumpList failed: %v", err)
+	}
+
+	// Construct URI
+	uri := fmt.Sprintf("http://localhost:8081/token_status_list/%s/%s/%s", country, doctype, listID)
+
+	// Set status
+	err = lm.SetStatus(uri, country, doctype, listID, 10, 1)
+	if err != nil {
+		t.Fatalf("SetStatus failed: %v", err)
+	}
+
+	// Verify status was set
+	status, err := lm.GetStatusFromURI(uri, 10)
+	if err != nil {
+		t.Fatalf("GetStatusFromURI failed: %v", err)
+	}
+
+	if status != 1 {
+		t.Errorf("Expected status 1, got %d", status)
+	}
+
+	// Verify in-memory status was updated
+	if lm.statusList[country][doctype].TokenStatusList.StatusList.Get(10) != 1 {
+		t.Errorf("In-memory status should be updated")
+	}
+
+	if lm.statusList[country][doctype].IdentifierList["10"] != 1 {
+		t.Error("In-memory identifier list should be updated")
+	}
+}
+
+// TestConcurrentAccess tests concurrent access to ListManager
+func TestConcurrentAccess(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 1000,
+		PrivKeyPath:         "c:\\code\\github\\gatisb\\status-list-go\\temp\\private_key\\decrypted_key.pem",
+		CertPath:            "c:\\code\\github\\gatisb\\status-list-go\\temp\\certificate\\certificate.pem",
+		CountryCode:         "DE",
+	}
+	storage := NewMockStorage()
+	lm := NewListManager(cfg, storage)
+
+	country := "DE"
+	doctype := "mDL"
+	expiryDate := "2025-12-31"
+
+	// Concurrently take indices
+	var wg sync.WaitGroup
+	indices := make([]int, 10)
+	errors := make([]error, 10)
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			index, err := lm.TakeIndexList(country, doctype, expiryDate)
+			indices[idx] = index
+			errors[idx] = err
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Check for errors and collect successful indices
+	var successfulIndices []int
+	for i, err := range errors {
+		if err != nil {
+			t.Errorf("Goroutine %d failed: %v", i, err)
+		} else {
+			successfulIndices = append(successfulIndices, indices[i])
+		}
+	}
+
+	// Verify all successful indices are unique
+	uniqueIndices := make(map[int]bool)
+	for _, index := range successfulIndices {
+		if uniqueIndices[index] {
+			t.Errorf("Duplicate index found: %d", index)
+		}
+		uniqueIndices[index] = true
+	}
+}

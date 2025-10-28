@@ -61,6 +61,13 @@ const (
 	ErrBadRequest         ErrorCode = "bad_request"
 	ErrParseForm          ErrorCode = "parse_form_error"
 	ErrStatusUpdateFailed ErrorCode = "status_update_failed"
+
+	// Storage errors
+	ErrStorageBackendInvalid   ErrorCode = "storage_backend_invalid"
+	ErrStorageConfigMissing    ErrorCode = "storage_config_missing"
+	ErrStorageConnectionFailed ErrorCode = "storage_connection_failed"
+	ErrStorageOperationFailed  ErrorCode = "storage_operation_failed"
+	ErrVersionMismatch         ErrorCode = "version_mismatch"
 )
 
 // ErrorResponse represents the standardized error response structure
@@ -111,6 +118,13 @@ var errorMessages = map[ErrorCode]string{
 	ErrBadRequest:         "Bad request format or parameters.",
 	ErrParseForm:          "Failed to parse form data.",
 	ErrStatusUpdateFailed: "Failed to update document status.",
+
+	// Storage errors
+	ErrStorageBackendInvalid:   "Invalid or unsupported storage backend type.",
+	ErrStorageConfigMissing:    "Required storage configuration is missing.",
+	ErrStorageConnectionFailed: "Failed to connect to storage backend.",
+	ErrStorageOperationFailed:  "Storage operation failed.",
+	ErrVersionMismatch:         "Version mismatch detected. The file was modified by another process.",
 }
 
 // GetErrorMessage returns the message for a given error code

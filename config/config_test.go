@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -525,9 +526,13 @@ func TestLoad(t *testing.T) {
 	})
 
 	t.Run("load with invalid directory path", func(t *testing.T) {
+		// Skip on Windows as it's difficult to create a path that os.MkdirAll will reject
+		if runtime.GOOS == "windows" {
+			t.Skip("Skipping invalid directory path test on Windows")
+		}
+
 		// Set an invalid directory path that cannot be created
-		// Using a path that requires admin privileges or doesn't exist on the root
-		invalidPath := "C:\\Windows\\System32\\invalid_test_directory_12345"
+		invalidPath := "/invalid"
 		os.Setenv("STATUS_LIST_DIR", invalidPath)
 
 		_, err := Load()
@@ -578,5 +583,122 @@ func TestConfigStruct(t *testing.T) {
 	privKey, cert := config.GetCertificatePaths()
 	if privKey != "/test/private.key" || cert != "/test/certificate.crt" {
 		t.Errorf("Expected certificate paths '/test/private.key' and '/test/certificate.crt', got '%s' and '%s'", privKey, cert)
+	}
+}
+
+// TestStorageConfigurationParsing tests that storage configuration fields are correctly loaded
+func TestStorageConfigurationParsing(t *testing.T) {
+	tests := []struct {
+		name     string
+		envVars  map[string]string
+		validate func(*testing.T, *Config)
+	}{
+		{
+			name: "default local storage backend",
+			envVars: map[string]string{
+				"STATUS_LIST_DIR": "/tmp/test_status_lists",
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.BackendType != "" && cfg.BackendType != "local" {
+					t.Errorf("Expected BackendType to be empty or 'local', got '%s'", cfg.BackendType)
+				}
+				if cfg.StatusListDir != "/tmp/test_status_lists" {
+					t.Errorf("Expected StatusListDir '/tmp/test_status_lists', got '%s'", cfg.StatusListDir)
+				}
+			},
+		},
+		{
+			name: "explicit local storage backend",
+			envVars: map[string]string{
+				"STATUS_LIST_STORAGE": "local",
+				"STATUS_LIST_DIR":     "/var/status_lists",
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.BackendType != "local" {
+					t.Errorf("Expected BackendType 'local', got '%s'", cfg.BackendType)
+				}
+			},
+		},
+		{
+			name: "S3 storage backend with all required fields",
+			envVars: map[string]string{
+				"STATUS_LIST_STORAGE":  "s3",
+				"S3_BUCKET":            "my-status-lists",
+				"S3_REGION":            "us-west-2",
+				"S3_ACCESS_KEY_ID":     "AKIAIOSFODNN7EXAMPLE",
+				"S3_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.BackendType != "s3" {
+					t.Errorf("Expected BackendType 's3', got '%s'", cfg.BackendType)
+				}
+				if cfg.S3Bucket != "my-status-lists" {
+					t.Errorf("Expected S3Bucket 'my-status-lists', got '%s'", cfg.S3Bucket)
+				}
+				if cfg.S3Region != "us-west-2" {
+					t.Errorf("Expected S3Region 'us-west-2', got '%s'", cfg.S3Region)
+				}
+				if cfg.S3AccessKeyID != "AKIAIOSFODNN7EXAMPLE" {
+					t.Errorf("Expected S3AccessKeyID 'AKIAIOSFODNN7EXAMPLE', got '%s'", cfg.S3AccessKeyID)
+				}
+				if cfg.S3SecretAccessKey != "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" {
+					t.Errorf("Expected S3SecretAccessKey to match, got '%s'", cfg.S3SecretAccessKey)
+				}
+			},
+		},
+		{
+			name: "S3 storage with custom endpoint",
+			envVars: map[string]string{
+				"STATUS_LIST_STORAGE":  "s3",
+				"S3_BUCKET":            "my-bucket",
+				"S3_ACCESS_KEY_ID":     "minioadmin",
+				"S3_SECRET_ACCESS_KEY": "minioadmin",
+				"S3_ENDPOINT":          "http://localhost:9000",
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.S3Endpoint != "http://localhost:9000" {
+					t.Errorf("Expected S3Endpoint 'http://localhost:9000', got '%s'", cfg.S3Endpoint)
+				}
+			},
+		},
+		{
+			name: "S3 storage with optional region",
+			envVars: map[string]string{
+				"STATUS_LIST_STORAGE":  "s3",
+				"S3_BUCKET":            "my-bucket",
+				"S3_ACCESS_KEY_ID":     "test",
+				"S3_SECRET_ACCESS_KEY": "test",
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.S3Region != "us-east-1" {
+					t.Errorf("Expected default S3Region 'us-east-1', got '%s'", cfg.S3Region)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clean up environment
+			defer func() {
+				for key := range tt.envVars {
+					os.Unsetenv(key)
+				}
+			}()
+
+			// Set environment variables
+			for key, value := range tt.envVars {
+				os.Setenv(key, value)
+			}
+
+			// Load configuration
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Failed to load config: %v", err)
+			}
+
+			// Run validation
+			tt.validate(t, cfg)
+		})
 	}
 }

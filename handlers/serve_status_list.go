@@ -17,9 +17,8 @@ limitations under the License.
 package handlers
 
 import (
-	"io"
+	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -69,29 +68,31 @@ func (h *StatusListHandler) ServeStatusList(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Find status list file
-	statusListPath := filepath.Join(h.config.StatusListDir, "token_status_list", country, doctype, rand, fileName)
+	// Build storage path (platform-independent)
+	statusListPath := filepath.Join("token_status_list", country, doctype, rand, fileName)
+	// Convert to forward slashes for storage consistency (S3 uses forward slashes)
+	statusListPath = filepath.ToSlash(statusListPath)
 
-	// Check if file exists before opening
-	if _, err := os.Stat(statusListPath); os.IsNotExist(err) {
-		WriteError(w, http.StatusNotFound, ErrListNotFound)
-		return
-	}
-
-	f, err := os.Open(statusListPath)
+	// Read file from storage backend
+	data, err := h.listManager.GetStorage().Read(statusListPath)
 	if err != nil {
-		WriteError(w, http.StatusInternalServerError, ErrInternalServer)
+		// Check if it's a not found error
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "does not exist") {
+			WriteError(w, http.StatusNotFound, ErrListNotFound)
+		} else {
+			WriteError(w, http.StatusInternalServerError, ErrInternalServer)
+		}
 		return
 	}
-	defer f.Close()
 
 	// Set response headers
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "public, max-age=3600") // Add security headers for RFC compliance
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 
-	// Stream file content
-	if _, err := io.Copy(w, f); err != nil {
+	// Write file content
+	if _, err := w.Write(data); err != nil {
 		// Log error but don't send response as headers are already written
 		return
 	}

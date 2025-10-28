@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"log"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -29,6 +28,7 @@ import (
 
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/models"
+	"github.com/unknovs/status-list-go/services/storage"
 
 	"github.com/google/uuid"
 )
@@ -36,16 +36,23 @@ import (
 // ListManager manages status lists and identifier lists
 type ListManager struct {
 	config     *config.Config
+	storage    storage.Storage
 	statusList map[string]map[string]*models.StatusListData
 	mutex      sync.RWMutex
 }
 
 // NewListManager creates a new list manager
-func NewListManager(cfg *config.Config) *ListManager {
+func NewListManager(cfg *config.Config, stor storage.Storage) *ListManager {
 	return &ListManager{
 		config:     cfg,
+		storage:    stor,
 		statusList: make(map[string]map[string]*models.StatusListData),
 	}
+}
+
+// GetStorage returns the storage backend for direct access when needed
+func (lm *ListManager) GetStorage() storage.Storage {
+	return lm.storage
 }
 
 // NewList initializes a new status list for a country and doctype
@@ -71,17 +78,6 @@ func (lm *ListManager) NewList(country, doctype string) {
 func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, doctype string) error {
 	rand := statusListData.Rand
 
-	// Create directories
-	tokenDir := filepath.Join(lm.config.StatusListDir, "token_status_list", country, doctype, rand)
-	identifierDir := filepath.Join(lm.config.StatusListDir, "identifier_list", country, doctype, rand)
-
-	if err := os.MkdirAll(tokenDir, 0755); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(identifierDir, 0755); err != nil {
-		return err
-	}
-
 	// Copy data and set metadata
 	statusListCopy := *statusListData
 	statusListCopy.Country = country
@@ -93,62 +89,98 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 		return err
 	}
 
-	jsonFilePath := filepath.Join(tokenDir, "full_list.json")
-	if err := os.WriteFile(jsonFilePath, jsonData, 0640); err != nil {
-		return err
+	// Define file paths
+	tokenJSONPath := filepath.Join("token_status_list", country, doctype, rand, "full_list.json")
+	identifierJSONPath := filepath.Join("identifier_list", country, doctype, rand, "full_list.json")
+
+	// Use storage interface to write files
+	// Check if files exist, create or write accordingly
+	tokenExists, err := lm.storage.Exists(tokenJSONPath)
+	if err != nil {
+		return fmt.Errorf("failed to check token file existence: %w", err)
+	}
+
+	if tokenExists {
+		// Get current version and increment it
+		currentVersion, err := lm.storage.GetVersion(tokenJSONPath)
+		if err != nil {
+			return fmt.Errorf("failed to get token file version: %w", err)
+		}
+		if err := lm.storage.Write(tokenJSONPath, jsonData, currentVersion+1); err != nil {
+			return fmt.Errorf("failed to update token JSON: %w", err)
+		}
+	} else {
+		// File doesn't exist, use Create
+		if err := lm.storage.Create(tokenJSONPath, jsonData); err != nil {
+			return fmt.Errorf("failed to create token JSON: %w", err)
+		}
 	}
 
 	// Save identifier list JSON
-	identifierJSONPath := filepath.Join(identifierDir, "full_list.json")
-	if err := os.WriteFile(identifierJSONPath, jsonData, 0640); err != nil {
-		return err
+	identifierExists, err := lm.storage.Exists(identifierJSONPath)
+	if err != nil {
+		return fmt.Errorf("failed to check identifier file existence: %w", err)
+	}
+
+	if identifierExists {
+		currentVersion, err := lm.storage.GetVersion(identifierJSONPath)
+		if err != nil {
+			return fmt.Errorf("failed to get identifier file version: %w", err)
+		}
+		if err := lm.storage.Write(identifierJSONPath, jsonData, currentVersion+1); err != nil {
+			return fmt.Errorf("failed to update identifier JSON: %w", err)
+		}
+	} else {
+		if err := lm.storage.Create(identifierJSONPath, jsonData); err != nil {
+			return fmt.Errorf("failed to create identifier JSON: %w", err)
+		}
 	}
 
 	// Generate JWT and CWT files
 	statusListURI := lm.config.ServiceURL + fmt.Sprintf("token_status_list/%s/%s/%s", country, doctype, rand)
 	identifierListURI := lm.config.ServiceURL + fmt.Sprintf("identifier_list/%s/%s/%s", country, doctype, rand)
 
-	// Generate token status list JWT
+	// Generate and save token status list JWT
 	jwtContent, err := lm.generateJWTFormat(statusListData.TokenStatusList, country, statusListURI)
 	if err != nil {
 		log.Printf("Failed to generate JWT: %v", err)
 	} else {
-		jwtFilePath := filepath.Join(tokenDir, "token_status_list.jwt")
-		if err := os.WriteFile(jwtFilePath, []byte(jwtContent), 0600); err != nil {
-			return err
+		jwtPath := filepath.Join("token_status_list", country, doctype, rand, "token_status_list.jwt")
+		if err := lm.writeOrCreateFile(jwtPath, []byte(jwtContent)); err != nil {
+			return fmt.Errorf("failed to save JWT: %w", err)
 		}
 	}
 
-	// Generate token status list CWT
+	// Generate and save token status list CWT
 	cwtContent, err := lm.generateCWTFormat(statusListData.TokenStatusList, country, statusListURI)
 	if err != nil {
 		log.Printf("Failed to generate CWT: %v", err)
 	} else {
-		cwtFilePath := filepath.Join(tokenDir, "token_status_list.cwt")
-		if err := os.WriteFile(cwtFilePath, []byte(cwtContent), 0600); err != nil {
-			return err
+		cwtPath := filepath.Join("token_status_list", country, doctype, rand, "token_status_list.cwt")
+		if err := lm.writeOrCreateFile(cwtPath, []byte(cwtContent)); err != nil {
+			return fmt.Errorf("failed to save CWT: %w", err)
 		}
 	}
 
-	// Generate identifier list JWT
+	// Generate and save identifier list JWT
 	identifierJWTContent, err := lm.generateIdentifierJWTFormat(statusListData.IdentifierList, country, identifierListURI)
 	if err != nil {
 		log.Printf("Failed to generate identifier JWT: %v", err)
 	} else {
-		identifierJWTPath := filepath.Join(identifierDir, "identifier_list.jwt")
-		if err := os.WriteFile(identifierJWTPath, []byte(identifierJWTContent), 0600); err != nil {
-			return err
+		identifierJWTPath := filepath.Join("identifier_list", country, doctype, rand, "identifier_list.jwt")
+		if err := lm.writeOrCreateFile(identifierJWTPath, []byte(identifierJWTContent)); err != nil {
+			return fmt.Errorf("failed to save identifier JWT: %w", err)
 		}
 	}
 
-	// Generate identifier list CWT
+	// Generate and save identifier list CWT
 	identifierCWTContent, err := lm.generateIdentifierCWTFormat(statusListData.IdentifierList, country, identifierListURI)
 	if err != nil {
 		log.Printf("Failed to generate identifier CWT: %v", err)
 	} else {
-		identifierCWTPath := filepath.Join(identifierDir, "identifier_list.cwt")
-		if err := os.WriteFile(identifierCWTPath, []byte(identifierCWTContent), 0600); err != nil {
-			return err
+		identifierCWTPath := filepath.Join("identifier_list", country, doctype, rand, "identifier_list.cwt")
+		if err := lm.writeOrCreateFile(identifierCWTPath, []byte(identifierCWTContent)); err != nil {
+			return fmt.Errorf("failed to save identifier CWT: %w", err)
 		}
 	}
 
@@ -159,6 +191,25 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 	return nil
 }
 
+// writeOrCreateFile is a helper that creates a file if it doesn't exist, or writes to it if it does
+func (lm *ListManager) writeOrCreateFile(path string, content []byte) error {
+	exists, err := lm.storage.Exists(path)
+	if err != nil {
+		return err
+	}
+
+	if exists {
+		// Get current version and increment it
+		currentVersion, err := lm.storage.GetVersion(path)
+		if err != nil {
+			return fmt.Errorf("failed to get current version: %w", err)
+		}
+		return lm.storage.Write(path, content, currentVersion+1)
+	}
+
+	return lm.storage.Create(path, content)
+}
+
 // LoadList loads a status list from disk
 func (lm *ListManager) LoadList(uri string) (*models.StatusListData, error) {
 	parsedURI, err := url.Parse(uri)
@@ -166,9 +217,11 @@ func (lm *ListManager) LoadList(uri string) (*models.StatusListData, error) {
 		return nil, err
 	}
 
-	folderPath := filepath.Join(lm.config.StatusListDir, parsedURI.Path, "full_list.json")
+	// Construct path relative to storage root (remove leading slash)
+	relativePath := strings.TrimPrefix(parsedURI.Path, "/")
+	folderPath := filepath.Join(relativePath, "full_list.json")
 
-	jsonData, err := os.ReadFile(folderPath)
+	jsonData, err := lm.storage.Read(folderPath)
 	if err != nil {
 		return nil, err
 	}

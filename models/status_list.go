@@ -89,7 +89,7 @@ func (sl *StatusList) Get(index int) int {
 	if byteIndex >= len(sl.data) {
 		return 0
 	}
-	return int((sl.data[byteIndex] >> (7 - bitIndex)) & 1)
+	return int((sl.data[byteIndex] >> bitIndex) & 1)
 }
 
 // Set sets the status at given index
@@ -106,9 +106,9 @@ func (sl *StatusList) Set(index, value int) {
 	}
 
 	if value == 1 {
-		sl.data[byteIndex] |= (1 << (7 - bitIndex))
+		sl.data[byteIndex] |= (1 << bitIndex)
 	} else {
-		sl.data[byteIndex] &^= (1 << (7 - bitIndex))
+		sl.data[byteIndex] &^= (1 << bitIndex)
 	}
 }
 

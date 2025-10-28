@@ -9,7 +9,7 @@ services:
       - "8080:8080"
     environment:
       # Basic configuration
-      API_KEY: "local-dev-key"
+      API_KEY: "local-dev-key" # X-API-Key
       SERVICE_URL: "http://localhost:8080/"
       # SWAGGER_URL_PREFIX: "/api"  # Only set this in production when behind a proxy that strips /api prefix
       COUNTRY_CODE: "LV"
@@ -25,6 +25,15 @@ services:
 
       # Allowed doctypes (comma-separated, optional - will use defaults if not set)
       ALLOWED_DOCTYPES: "eu.europa.ec.eudi.pid.1,org.iso.18013.5.1.mDL,custom.doctype.1"
+
+      # Storage Backend Configuration
+
+      STATUS_LIST_STORAGE: "s3"
+      S3_BUCKET: "status-lists"
+      S3_ENDPOINT: "http://minio:9000"  # Use MinIO service name for inter-container communication
+      S3_ACCESS_KEY_ID: "minioadmin"
+      S3_SECRET_ACCESS_KEY: "minioadmin"
+
     volumes:
       # Mount certificate directory from host for testing, no need in production (use secrets for production)
       - ./temp:/app/certs
@@ -42,10 +51,49 @@ services:
       retries: 3
       start_period: 40s
 
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # MinIO bucket initialization service
+  # This creates the required bucket when MinIO starts
+  minio-init:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      mc mb myminio/status-lists --ignore-existing;
+      mc anonymous set download myminio/status-lists;
+      echo 'MinIO bucket status-lists created successfully';
+      exit 0;
+      "
+
 volumes:
   status_lists_data:
     driver: local
   backup_data:
     driver: local
   log_data:
+    driver: local
+  minio_data:
     driver: local

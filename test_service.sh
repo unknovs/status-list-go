@@ -12,15 +12,15 @@ echo "============================================"
 echo
 
 # Check if service is running
-echo "🔍 Checking if service is running..."
-if curl -s "$BASE_URL/health" > /dev/null; then
-    echo "✅ Service is running"
-    curl -s "$BASE_URL/health" | echo "   Health check: $(cat)"
-else
-    echo "❌ Service is not running. Please start it first:"
-    echo "   go run main.go"
-    exit 1
-fi
+# echo "🔍 Checking if service is running..."
+# if curl -s "$BASE_URL/health" > /dev/null; then
+#     echo "✅ Service is running"
+#     curl -s "$BASE_URL/health" | echo "   Health check: $(cat)"
+# else
+#     echo "❌ Service is not running. Please start it first:"
+#     echo "   go run main.go"
+#     # exit 1
+# fi
 
 echo
 

@@ -1,0 +1,304 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  GO_VERSION: '1.25'
+  REGISTRY: docker.io
+  IMAGE_NAME: status-list-go
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Generate test certificates
+        run: |
+          mkdir -p temp/certificate temp/private_key
+          
+          # Generate unencrypted ECDSA private key (P-256, as used in the code)
+          openssl ecparam -name prime256v1 -genkey -noout -out temp/private_key/private-key.pem
+          
+          # Generate self-signed certificate (PEM format)
+          openssl req -new -x509 -key temp/private_key/private-key.pem -out temp/certificate/certificate.pem -days 365 -subj "/C=LV/O=Test/CN=status-list-test"
+          
+          # Convert certificate to DER format (as expected by some tests, e.g., PID-DS-0002.cert.der)
+          openssl x509 -in temp/certificate/certificate.pem -outform der -out temp/certificate/PID-DS-0002.cert.der
+          
+          # Create missing test files expected by some tests
+          cp temp/private_key/private-key.pem /tmp/test.key
+          cp temp/certificate/certificate.pem /tmp/test.cert
+          
+          # Create directories required by config tests
+          sudo mkdir -p /var/opt/status_lists /var/opt/status_list_backup /var/status_lists /tmp/status_lists
+          sudo chmod 755 /var/opt/status_lists /var/opt/status_list_backup /var/status_lists /tmp/status_lists
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test -timeout=2m -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage to Codecov
+        if: github.event_name != 'pull_request'
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella
+
+  sonarqube:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests with coverage
+        run: go test -timeout=2m -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      - name: SonarQube Quality Gate
+        uses: SonarSource/sonarqube-quality-gate-action@v1
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set image name
+        id: image-name
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image-name.outputs.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
+
+      - name: Build Docker image (PRs)
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+
+      - name: Export Docker image as tar (PRs)
+        if: github.event_name == 'pull_request'
+        run: |
+          # Get the first tag from the metadata output (should be the pr-* tag)
+          IMAGE_TAG=$(echo "${{ steps.meta.outputs.tags }}" | cut -d',' -f1)
+          echo "Exporting image $IMAGE_TAG to status-list-go.tar"
+          docker save $IMAGE_TAG -o status-list-go.tar
+
+      - name: Build and push Docker image (pushes)
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+
+      - name: Upload Docker image tar (PRs)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-tar
+          path: status-list-go.tar
+          retention-days: 1
+
+  security-scan:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Docker image tar (PRs)
+        if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-tar
+          path: .
+
+      - name: Set scan target
+        id: scan-target
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "image=$(pwd)/status-list-go.tar" >> $GITHUB_OUTPUT
+            echo "local=true" >> $GITHUB_OUTPUT
+          else
+            echo "image=${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_OUTPUT
+            echo "local=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Login to Docker Hub for scanning
+        if: steps.scan-target.outputs.local == 'false'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Wait for image to be available
+        if: steps.scan-target.outputs.local == 'false'
+        run: |
+          echo "Waiting for Docker image to be available..."
+          sleep 30
+
+      - name: Pull and verify image exists
+        if: steps.scan-target.outputs.local == 'false'
+        run: |
+          IMAGE_REF="${{ steps.scan-target.outputs.image }}"
+          echo "Checking if image exists: $IMAGE_REF"
+          if docker manifest inspect $IMAGE_REF > /dev/null 2>&1; then
+            echo "✅ Image exists and is accessible"
+            echo "IMAGE_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "❌ Image not found or not accessible"
+            echo "IMAGE_EXISTS=false" >> $GITHUB_ENV
+          fi
+
+      - name: Verify local image exists
+        if: steps.scan-target.outputs.local == 'true'
+        run: |
+          IMAGE_REF="${{ steps.scan-target.outputs.image }}"
+          echo "Checking if tar file exists: $IMAGE_REF"
+          if [ -f "$IMAGE_REF" ]; then
+            echo "✅ Tar file exists"
+            echo "IMAGE_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "❌ Tar file not found"
+            echo "IMAGE_EXISTS=false" >> $GITHUB_ENV
+          fi
+
+      - name: Setup Trivy
+        uses: aquasecurity/setup-trivy@v0.2.0
+
+      - name: Run Trivy vulnerability scanner
+        if: env.IMAGE_EXISTS == 'true'
+        run: |
+          if [ "${{ steps.scan-target.outputs.local }}" = "true" ]; then
+            echo "🔍 Scanning Docker image from tar file..."
+            trivy image --input ${{ steps.scan-target.outputs.image }} --format table --format sarif --output trivy-results.sarif --no-progress
+            echo "📊 Scan complete. SARIF results saved to trivy-results.sarif"
+          else
+            echo "🔍 Scanning remote Docker image..."
+            trivy image ${{ steps.scan-target.outputs.image }} --format table --format sarif --output trivy-results.sarif --no-progress
+            echo "📊 Scan complete. SARIF results saved to trivy-results.sarif"
+          fi
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        if: env.IMAGE_EXISTS == 'true' && github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Skip security scan
+        if: env.IMAGE_EXISTS == 'false'
+        run: |
+          echo "⚠️ Skipping security scan - image not available"
+          echo "This might happen if the build failed"
