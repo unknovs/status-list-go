@@ -9,7 +9,7 @@ services:
       - "8080:8080"
     environment:
       # Basic configuration
-      API_KEY: "local-dev-key"
+      API_KEY: "local-dev-key" # X-API-Key
       SERVICE_URL: "http://localhost:8080/"
       # SWAGGER_URL_PREFIX: "/api"  # Only set this in production when behind a proxy that strips /api prefix
       COUNTRY_CODE: "LV"
