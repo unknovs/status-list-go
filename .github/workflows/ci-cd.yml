@@ -124,7 +124,7 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
-          outputs: type=tar,dest=status-list-go.tar
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -132,6 +132,14 @@ jobs:
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             COMMIT=${{ github.sha }}
+
+      - name: Export Docker image as tar (PRs)
+        if: github.event_name == 'pull_request'
+        run: |
+          # Get the first tag from the metadata output (should be the pr-* tag)
+          IMAGE_TAG=$(echo "${{ steps.meta.outputs.tags }}" | cut -d',' -f1)
+          echo "Exporting image $IMAGE_TAG to status-list-go.tar"
+          docker save $IMAGE_TAG -o status-list-go.tar
 
       - name: Build and push Docker image (pushes)
         if: github.event_name != 'pull_request'
