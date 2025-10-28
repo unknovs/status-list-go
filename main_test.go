@@ -360,7 +360,7 @@ func TestMain_ConfigLoadFailure(t *testing.T) {
 		// Since main() calls log.Fatalf on config load failure, test in subprocess
 		if os.Getenv("TEST_MAIN_CONFIG_FAIL") == "1" {
 			// Set an invalid directory that should cause config.Load() to fail
-			os.Setenv("STATUS_LIST_DIR", "/dev/null/invalid_directory")
+			os.Setenv("STATUS_LIST_DIR", "/root/invalid_directory")
 			os.Args = []string{"status-list-go"}
 			main()
 			return

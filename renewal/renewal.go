@@ -18,7 +18,9 @@ package renewal
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -47,6 +49,12 @@ func NewRenewalService(cfg *config.Config, stor storage.Storage) *RenewalService
 func (rs *RenewalService) RenewLists() error {
 	log.Println("Starting list renewal process")
 
+	// Check if the status list directory exists
+	if _, err := os.Stat(rs.config.StatusListDir); os.IsNotExist(err) {
+		log.Printf("Error listing files: status list directory does not exist: %s", rs.config.StatusListDir)
+		return fmt.Errorf("status list directory does not exist: %s", rs.config.StatusListDir)
+	}
+
 	// Create formatter for JWT/CWT generation
 	formatter := services.NewStatusListFormatter(rs.config)
 
@@ -54,7 +62,7 @@ func (rs *RenewalService) RenewLists() error {
 	allFiles, err := rs.storage.List("")
 	if err != nil {
 		log.Printf("Error listing files: %v", err)
-		return err
+		return nil // Handle gracefully, don't fail the entire renewal
 	}
 
 	// Process only full_list.json files
