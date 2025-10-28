@@ -175,7 +175,7 @@ jobs:
         id: scan-target
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "image=status-list-go.tar" >> $GITHUB_OUTPUT
+            echo "image=$(pwd)/status-list-go.tar" >> $GITHUB_OUTPUT
             echo "local=true" >> $GITHUB_OUTPUT
           else
             echo "image=${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_OUTPUT
@@ -226,7 +226,8 @@ jobs:
         if: env.IMAGE_EXISTS == 'true'
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ steps.scan-target.outputs.image }}
+          scan-type: image
+          scan-ref: ${{ steps.scan-target.outputs.image }}
           format: 'sarif'
           output: 'trivy-results.sarif'
 
