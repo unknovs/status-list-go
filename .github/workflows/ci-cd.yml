@@ -222,14 +222,17 @@ jobs:
             echo "IMAGE_EXISTS=false" >> $GITHUB_ENV
           fi
 
+      - name: Setup Trivy
+        uses: aquasecurity/setup-trivy@v0.2.0
+
       - name: Run Trivy vulnerability scanner
         if: env.IMAGE_EXISTS == 'true'
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: image
-          scan-ref: ${{ steps.scan-target.outputs.image }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
+        run: |
+          if [ "${{ steps.scan-target.outputs.local }}" = "true" ]; then
+            trivy image --input ${{ steps.scan-target.outputs.image }} --format sarif --output trivy-results.sarif
+          else
+            trivy image ${{ steps.scan-target.outputs.image }} --format sarif --output trivy-results.sarif
+          fi
 
       - name: Upload Trivy scan results to GitHub Security tab
         if: env.IMAGE_EXISTS == 'true'
