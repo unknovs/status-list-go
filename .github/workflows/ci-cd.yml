@@ -240,9 +240,13 @@ jobs:
         if: env.IMAGE_EXISTS == 'true'
         run: |
           if [ "${{ steps.scan-target.outputs.local }}" = "true" ]; then
-            trivy image --input ${{ steps.scan-target.outputs.image }} --format table --format sarif --output trivy-results.sarif
+            echo "🔍 Scanning Docker image from tar file..."
+            trivy image --input ${{ steps.scan-target.outputs.image }} --format table --format sarif --output trivy-results.sarif --no-progress
+            echo "📊 Scan complete. SARIF results saved to trivy-results.sarif"
           else
-            trivy image ${{ steps.scan-target.outputs.image }} --format table --format sarif --output trivy-results.sarif
+            echo "🔍 Scanning remote Docker image..."
+            trivy image ${{ steps.scan-target.outputs.image }} --format table --format sarif --output trivy-results.sarif --no-progress
+            echo "📊 Scan complete. SARIF results saved to trivy-results.sarif"
           fi
 
       - name: Upload Trivy scan results to GitHub Security tab
