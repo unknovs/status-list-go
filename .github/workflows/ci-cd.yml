@@ -117,14 +117,14 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
 
-      - name: Build and push Docker image
+      - name: Build Docker image (PRs)
+        if: github.event_name == 'pull_request'
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
-          push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
+          platforms: linux/amd64
+          outputs: type=tar,dest=status-list-go.tar
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -133,17 +133,49 @@ jobs:
             VERSION=${{ steps.meta.outputs.version }}
             COMMIT=${{ github.sha }}
 
+      - name: Build and push Docker image (pushes)
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+
+      - name: Upload Docker image tar (PRs)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-tar
+          path: status-list-go.tar
+          retention-days: 1
+
   security-scan:
     needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Download Docker image tar (PRs)
+        if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-tar
+          path: .
+
       - name: Set scan target
         id: scan-target
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:pr-${{ github.event.number }}" >> $GITHUB_OUTPUT
+            echo "image=status-list-go.tar" >> $GITHUB_OUTPUT
             echo "local=true" >> $GITHUB_OUTPUT
           else
             echo "image=${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_OUTPUT
@@ -181,12 +213,12 @@ jobs:
         if: steps.scan-target.outputs.local == 'true'
         run: |
           IMAGE_REF="${{ steps.scan-target.outputs.image }}"
-          echo "Checking if local image exists: $IMAGE_REF"
-          if docker image inspect $IMAGE_REF > /dev/null 2>&1; then
-            echo "✅ Local image exists"
+          echo "Checking if tar file exists: $IMAGE_REF"
+          if [ -f "$IMAGE_REF" ]; then
+            echo "✅ Tar file exists"
             echo "IMAGE_EXISTS=true" >> $GITHUB_ENV
           else
-            echo "❌ Local image not found"
+            echo "❌ Tar file not found"
             echo "IMAGE_EXISTS=false" >> $GITHUB_ENV
           fi
 
