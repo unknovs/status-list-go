@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -357,10 +358,18 @@ func TestMain_NormalExecution(t *testing.T) {
 
 func TestMain_ConfigLoadFailure(t *testing.T) {
 	t.Run("main with config load failure", func(t *testing.T) {
+		// Determine invalid path based on OS
+		var invalidPath string
+		if runtime.GOOS == "windows" {
+			invalidPath = "C:\\Windows\\System32\\config\\system\\invalid<directory"
+		} else {
+			invalidPath = "/invalid"
+		}
+
 		// Since main() calls log.Fatalf on config load failure, test in subprocess
 		if os.Getenv("TEST_MAIN_CONFIG_FAIL") == "1" {
 			// Set an invalid directory that should cause config.Load() to fail
-			os.Setenv("STATUS_LIST_DIR", "/root/invalid_directory")
+			os.Setenv("STATUS_LIST_DIR", invalidPath)
 			os.Args = []string{"status-list-go"}
 			main()
 			return
@@ -373,7 +382,7 @@ func TestMain_ConfigLoadFailure(t *testing.T) {
 		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestMain_ConfigLoadFailure/main_with_config_load_failure")
 		cmd.Env = append(os.Environ(),
 			"TEST_MAIN_CONFIG_FAIL=1",
-			"STATUS_LIST_DIR=C:\\Windows\\System32\\invalid_test_directory_12345",
+			"STATUS_LIST_DIR="+invalidPath,
 		)
 
 		output, err := cmd.CombinedOutput()

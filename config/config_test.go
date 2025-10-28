@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -525,9 +526,13 @@ func TestLoad(t *testing.T) {
 	})
 
 	t.Run("load with invalid directory path", func(t *testing.T) {
+		// Skip on Windows as it's difficult to create a path that os.MkdirAll will reject
+		if runtime.GOOS == "windows" {
+			t.Skip("Skipping invalid directory path test on Windows")
+		}
+
 		// Set an invalid directory path that cannot be created
-		// Using a path that requires admin privileges or doesn't exist on the root
-		invalidPath := "C:\\Windows\\System32\\invalid_test_directory_12345"
+		invalidPath := "/invalid"
 		os.Setenv("STATUS_LIST_DIR", invalidPath)
 
 		_, err := Load()
