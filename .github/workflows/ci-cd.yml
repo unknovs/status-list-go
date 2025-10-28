@@ -56,14 +56,14 @@ jobs:
           cp temp/certificate/certificate.pem /tmp/test.cert
           
           # Create directories required by config tests
-          sudo mkdir -p /var/opt/status_lists /var/opt/status_list_backup /tmp/status_lists
-          sudo chmod 777 /var/opt/status_lists /var/opt/status_list_backup /tmp/status_lists
+          sudo mkdir -p /var/opt/status_lists /var/opt/status_list_backup /var/status_lists /tmp/status_lists
+          sudo chmod 777 /var/opt/status_lists /var/opt/status_list_backup /var/status_lists /tmp/status_lists
 
       - name: Run vet
         run: go vet ./...
 
       - name: Run tests
-        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+        run: go test -timeout=2m -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage to Codecov
         if: github.event_name != 'pull_request'
