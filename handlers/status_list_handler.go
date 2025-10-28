@@ -84,7 +84,7 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 			safeHeaders[k] = v
 		}
 	}
-	log.Printf("Take Request, headers: %v, form: %v", safeHeaders, r.Form)
+	log.Printf("Take Request, headers: %v", safeHeaders)
 
 	// Validate API key
 	apiKey := r.Header.Get(APIKeyHeader)
@@ -148,7 +148,7 @@ func (h *StatusListHandler) GetIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Get request args: %v", r.URL.Query())
+	log.Printf("Get request received")
 
 	uri := r.URL.Query().Get("uri")
 	id := r.URL.Query().Get("id")

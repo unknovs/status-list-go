@@ -5,6 +5,7 @@
 
 API_KEY="local-dev-key"
 BASE_URL="http://localhost:8080"
+CONTENT_TYPE_HEADER="Content-Type: application/x-www-form-urlencoded"
 
 echo "============================================"
 echo "  Status List Service Test Script"
@@ -28,7 +29,7 @@ echo
 echo "📝 Test 1: Taking a new index..."
 RESPONSE=$(curl -s -X POST "$BASE_URL/token_status_list/take" \
   -H "X-Api-Key: $API_KEY" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "$CONTENT_TYPE_HEADER" \
   -d "doctype=eu.europa.ec.eudi.pid.1" \
   -d "country=LV" \
   -d "expiry_date=2025-12-31")
@@ -91,7 +92,7 @@ if [[ $? -eq 0 ]] && [[ "$RESPONSE" == *"status_list"* ]]; then
             echo "🚫 Test 3: Revoking token..."
             REVOKE_RESPONSE=$(curl -s -X POST "$BASE_URL/token_status_list/set" \
               -H "X-Api-Key: $API_KEY" \
-              -H "Content-Type: application/x-www-form-urlencoded" \
+              -H "$CONTENT_TYPE_HEADER" \
               -d "uri=$STATUS_URI" \
               -d "idx=$INDEX" \
               -d "status=1")
@@ -128,7 +129,7 @@ echo
 echo "🔐 Test 5: Testing invalid API key..."
 ERROR_RESPONSE=$(curl -s -X POST "$BASE_URL/token_status_list/take" \
   -H "X-Api-Key: wrong_key" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "$CONTENT_TYPE_HEADER" \
   -d "doctype=eu.europa.ec.eudi.pid.1" \
   -d "country=LV" \
   -d "expiry_date=2025-12-31")
@@ -145,7 +146,7 @@ echo
 echo "📄 Test 6: Testing invalid doctype..."
 ERROR_RESPONSE=$(curl -s -X POST "$BASE_URL/token_status_list/take" \
   -H "X-Api-Key: $API_KEY" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "$CONTENT_TYPE_HEADER" \
   -d "doctype=invalid.type" \
   -d "country=LV" \
   -d "expiry_date=2025-12-31")
