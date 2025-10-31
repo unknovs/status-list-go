@@ -62,6 +62,16 @@ jobs:
       - name: Run vet
         run: go vet ./...
 
+      - name: Setup Trivy
+        if: github.event_name == 'pull_request'
+        uses: aquasecurity/setup-trivy@v0.2.0
+
+      - name: Run Trivy filesystem scan
+        if: github.event_name == 'pull_request'
+        run: |
+          trivy fs --exit-code 0 --severity UNKNOWN,LOW,MEDIUM .
+          trivy fs --exit-code 1 --severity HIGH,CRITICAL .
+
       - name: Run tests
         run: go test -timeout=2m -race -coverprofile=coverage.out -covermode=atomic ./...
 
