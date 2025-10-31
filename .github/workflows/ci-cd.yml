@@ -38,6 +38,19 @@ jobs:
       - name: Verify dependencies
         run: go mod verify
 
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Setup Trivy
+        if: github.event_name == 'pull_request'
+        uses: aquasecurity/setup-trivy@v0.2.0
+
+      - name: Run Trivy filesystem scan
+        if: github.event_name == 'pull_request'
+        run: |
+          trivy fs --exit-code 0 --severity UNKNOWN,LOW,MEDIUM .
+          trivy fs --exit-code 1 --severity HIGH,CRITICAL .
+
       - name: Generate test certificates
         run: |
           mkdir -p temp/certificate temp/private_key
@@ -59,18 +72,6 @@ jobs:
           sudo mkdir -p /var/opt/status_lists /var/opt/status_list_backup /var/status_lists /tmp/status_lists
           sudo chmod 755 /var/opt/status_lists /var/opt/status_list_backup /var/status_lists /tmp/status_lists
 
-      - name: Run vet
-        run: go vet ./...
-
-      - name: Setup Trivy
-        if: github.event_name == 'pull_request'
-        uses: aquasecurity/setup-trivy@v0.2.0
-
-      - name: Run Trivy filesystem scan
-        if: github.event_name == 'pull_request'
-        run: |
-          trivy fs --exit-code 0 --severity UNKNOWN,LOW,MEDIUM .
-          trivy fs --exit-code 1 --severity HIGH,CRITICAL .
 
       - name: Run tests
         run: go test -timeout=2m -race -coverprofile=coverage.out -covermode=atomic ./...
