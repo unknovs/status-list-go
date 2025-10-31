@@ -252,19 +252,13 @@ jobs:
         run: |
           if [ "${{ steps.scan-target.outputs.local }}" = "true" ]; then
             echo "🔍 Scanning Docker image from tar file..."
-            trivy image --input ${{ steps.scan-target.outputs.image }} --format table --format sarif --output trivy-results.sarif --no-progress
-            echo "📊 Scan complete. SARIF results saved to trivy-results.sarif"
+            trivy image --input ${{ steps.scan-target.outputs.image }} --exit-code 0 --severity UNKNOWN,LOW,MEDIUM
+            trivy image --input ${{ steps.scan-target.outputs.image }} --exit-code 1 --severity HIGH,CRITICAL
           else
             echo "🔍 Scanning remote Docker image..."
-            trivy image ${{ steps.scan-target.outputs.image }} --format table --format sarif --output trivy-results.sarif --no-progress
-            echo "📊 Scan complete. SARIF results saved to trivy-results.sarif"
+            trivy image ${{ steps.scan-target.outputs.image }} --exit-code 0 --severity UNKNOWN,LOW,MEDIUM
+            trivy image ${{ steps.scan-target.outputs.image }} --exit-code 1 --severity HIGH,CRITICAL
           fi
-
-      - name: Upload Trivy scan results to GitHub Security tab
-        if: env.IMAGE_EXISTS == 'true' && github.event_name != 'pull_request'
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
 
       - name: Skip security scan
         if: env.IMAGE_EXISTS == 'false'
