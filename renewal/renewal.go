@@ -125,8 +125,8 @@ func (rs *RenewalService) processListFile(filePath string, formatter *services.S
 
 		if expiresDate.Before(time.Now()) {
 			log.Printf("List %s is expired, skipping renewal", dirPath)
-			// Note: We don't delete expired lists as this would require managing all files in the directory
-			// In production, expired lists should be archived separately
+			// Note: Expired lists are cleaned up by the separate cleanup service
+			// which runs on a configurable schedule (default: daily at 2:00 AM)
 			return nil
 		}
 	}
