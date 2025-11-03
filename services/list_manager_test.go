@@ -133,6 +133,25 @@ func (m *MockStorage) GetVersion(path string) (int, error) {
 	return version, nil
 }
 
+func (m *MockStorage) DeleteTree(prefix string) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	prefix = strings.ReplaceAll(prefix, "\\", "/")
+	if strings.TrimSpace(prefix) == "" {
+		return fmt.Errorf("prefix is required")
+	}
+
+	for path := range m.files {
+		if strings.HasPrefix(path, prefix) {
+			delete(m.files, path)
+			delete(m.version, path)
+		}
+	}
+
+	return nil
+}
+
 // TestNewListManager tests the creation of a new ListManager
 func TestNewListManager(t *testing.T) {
 	cfg := &config.Config{

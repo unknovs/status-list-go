@@ -19,6 +19,7 @@ package config
 import (
 	"log"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -32,6 +33,9 @@ type Config struct {
 	StatusListDir       string
 	BackupDir           string
 	LogDir              string
+	CleanupEnabled      bool
+	CleanupHour         int
+	CleanupMinute       int
 
 	// Simple certificate configuration
 	PrivKeyPath string
@@ -62,6 +66,9 @@ func Load() (*Config, error) {
 		StatusListDir:       getEnv("STATUS_LIST_DIR", "/var/opt/status_lists"),
 		BackupDir:           getEnv("BACKUP_DIR", "/var/opt/status_list_backup"),
 		LogDir:              getEnv("LOG_DIR", "/tmp/status_lists"),
+		CleanupEnabled:      getEnvBool("STATUS_LIST_CLEANUP_ENABLED", true),
+		CleanupHour:         normalizeHour(getEnvInt("STATUS_LIST_CLEANUP_HOUR", 2)),
+		CleanupMinute:       normalizeMinute(getEnvInt("STATUS_LIST_CLEANUP_MINUTE", 0)),
 
 		// Certificate configuration from environment or Docker secrets
 		// PrivKeyPath: getEnv("PRIVATE_KEY_PATH", "/run/secrets/private_key"),
@@ -158,6 +165,36 @@ func getEnvArray(key string) map[string]bool {
 	return result
 }
 
+func getEnvBool(key string, defaultValue bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return defaultValue
+	}
+
+	switch strings.ToLower(value) {
+	case "true", "1", "yes", "y", "on":
+		return true
+	case "false", "0", "no", "n", "off":
+		return false
+	default:
+		return defaultValue
+	}
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return defaultValue
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultValue
+	}
+
+	return parsed
+}
+
 func getAllowedDoctypes() map[string]bool {
 	// Check if doctypes are specified via environment variable
 	envDoctypes := getEnvArray("ALLOWED_DOCTYPES")
@@ -178,6 +215,20 @@ func getAllowedDoctypes() map[string]bool {
 
 func ensureDir(path string) error {
 	return os.MkdirAll(path, 0755)
+}
+
+func normalizeHour(value int) int {
+	if value < 0 || value > 23 {
+		return 2
+	}
+	return value
+}
+
+func normalizeMinute(value int) int {
+	if value < 0 || value > 59 {
+		return 0
+	}
+	return value
 }
 
 // ValidateDoctype validates if the doctype is allowed

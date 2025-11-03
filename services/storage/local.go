@@ -186,6 +186,29 @@ func (ls *LocalStorage) GetVersion(path string) (int, error) {
 	return version, nil
 }
 
+// DeleteTree removes all files and directories under the given prefix.
+func (ls *LocalStorage) DeleteTree(prefix string) error {
+	if strings.TrimSpace(prefix) == "" {
+		return fmt.Errorf("prefix is required for DeleteTree")
+	}
+
+	relPath := filepath.FromSlash(prefix)
+	fullPath := filepath.Join(ls.StatusListDir, relPath)
+
+	if _, err := os.Stat(fullPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to inspect path: %w", err)
+	}
+
+	if err := os.RemoveAll(fullPath); err != nil {
+		return fmt.Errorf("failed to remove path: %w", err)
+	}
+
+	return nil
+}
+
 // atomicWrite writes data to a file atomically using a temp file and rename.
 // This prevents partial writes in case of failures.
 func atomicWrite(path string, data []byte) error {

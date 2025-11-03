@@ -350,3 +350,31 @@ func pathStartsWith(path, prefix string) bool {
 
 	return path[:len(prefix)] == prefix
 }
+
+func TestLocalStorageDeleteTree(t *testing.T) {
+	tempDir := t.TempDir()
+	storage := &LocalStorage{StatusListDir: tempDir}
+
+	dirPath := filepath.Join("token_status_list", "LV", "pid", "list1")
+	fullDir := filepath.Join(tempDir, dirPath)
+	if err := os.MkdirAll(fullDir, 0755); err != nil {
+		t.Fatalf("failed to create test directory: %v", err)
+	}
+
+	filePath := filepath.Join(fullDir, "full_list.json")
+	if err := os.WriteFile(filePath, []byte("{}"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	if err := storage.DeleteTree(filepath.ToSlash(dirPath)); err != nil {
+		t.Fatalf("DeleteTree returned error: %v", err)
+	}
+
+	if _, err := os.Stat(fullDir); !os.IsNotExist(err) {
+		t.Errorf("expected directory %s to be removed", fullDir)
+	}
+
+	if err := storage.DeleteTree("nonexistent/path"); err != nil {
+		t.Fatalf("DeleteTree for missing path returned error: %v", err)
+	}
+}

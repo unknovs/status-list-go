@@ -80,6 +80,71 @@ func TestGetEnv(t *testing.T) {
 	}
 }
 
+func TestGetEnvBool(t *testing.T) {
+	tests := []struct {
+		name         string
+		value        string
+		defaultValue bool
+		expected     bool
+	}{
+		{"truthy true", "true", false, true},
+		{"truthy one", "1", false, true},
+		{"truthy yes", "YES", false, true},
+		{"falsy false", "false", true, false},
+		{"falsy zero", "0", true, false},
+		{"invalid fallback", "maybe", true, true},
+		{"empty fallback", "", false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const key = "TEST_BOOL_ENV"
+			if tt.value == "" {
+				os.Unsetenv(key)
+			} else {
+				os.Setenv(key, tt.value)
+			}
+			t.Cleanup(func() { os.Unsetenv(key) })
+
+			result := getEnvBool(key, tt.defaultValue)
+			if result != tt.expected {
+				t.Fatalf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestGetEnvInt(t *testing.T) {
+	tests := []struct {
+		name         string
+		value        string
+		defaultValue int
+		expected     int
+	}{
+		{"valid number", "5", 1, 5},
+		{"negative number", "-1", 2, -1},
+		{"invalid fallback", "abc", 3, 3},
+		{"empty fallback", "", 4, 4},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const key = "TEST_INT_ENV"
+			if tt.value == "" {
+				os.Unsetenv(key)
+			} else {
+				os.Setenv(key, tt.value)
+			}
+			t.Cleanup(func() { os.Unsetenv(key) })
+
+			result := getEnvInt(key, tt.defaultValue)
+			if result != tt.expected {
+				t.Fatalf("expected %d, got %d", tt.expected, result)
+			}
+		})
+	}
+}
+
 func TestNormalizeBasePath(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -402,6 +467,7 @@ func TestLoad(t *testing.T) {
 	envVars := []string{
 		"API_KEY", "SERVICE_URL", "STATUS_LIST_DIR", "BACKUP_DIR", "LOG_DIR",
 		"PRIVATE_KEY_PATH", "CERTIFICATE_PATH", "COUNTRY_CODE", "ALLOWED_DOCTYPES",
+		"STATUS_LIST_CLEANUP_ENABLED", "STATUS_LIST_CLEANUP_HOUR", "STATUS_LIST_CLEANUP_MINUTE",
 	}
 
 	for _, envVar := range envVars {
@@ -463,6 +529,18 @@ func TestLoad(t *testing.T) {
 			t.Errorf("Expected CountryCode 'LV', got '%s'", config.CountryCode)
 		}
 
+		if !config.CleanupEnabled {
+			t.Error("Expected cleanup to be enabled by default")
+		}
+
+		if config.CleanupHour != 2 {
+			t.Errorf("Expected CleanupHour 2, got %d", config.CleanupHour)
+		}
+
+		if config.CleanupMinute != 0 {
+			t.Errorf("Expected CleanupMinute 0, got %d", config.CleanupMinute)
+		}
+
 		// Test that default doctypes are loaded
 		expectedDoctypes := map[string]bool{
 			"eu.europa.ec.eudi.ehic.1":    true,
@@ -505,6 +583,9 @@ func TestLoad(t *testing.T) {
 		os.Setenv("CERTIFICATE_PATH", "/custom/path/to/certificate.crt")
 		os.Setenv("COUNTRY_CODE", "EE")
 		os.Setenv("ALLOWED_DOCTYPES", "CUSTOM1,CUSTOM2,CUSTOM3")
+		os.Setenv("STATUS_LIST_CLEANUP_ENABLED", "false")
+		os.Setenv("STATUS_LIST_CLEANUP_HOUR", "5")
+		os.Setenv("STATUS_LIST_CLEANUP_MINUTE", "30")
 
 		config, err := Load()
 		if err != nil {
@@ -534,6 +615,18 @@ func TestLoad(t *testing.T) {
 
 		if config.BasePath != "/status-list" {
 			t.Errorf("Expected BasePath '/status-list', got '%s'", config.BasePath)
+		}
+
+		if config.CleanupEnabled {
+			t.Error("Expected cleanup to be disabled via env")
+		}
+
+		if config.CleanupHour != 5 {
+			t.Errorf("Expected CleanupHour 5, got %d", config.CleanupHour)
+		}
+
+		if config.CleanupMinute != 30 {
+			t.Errorf("Expected CleanupMinute 30, got %d", config.CleanupMinute)
 		}
 
 		// Test custom doctypes
@@ -586,6 +679,9 @@ func TestConfigStruct(t *testing.T) {
 		CertPath:            "/test/certificate.crt",
 		CountryCode:         "TEST",
 		AllowedDoctypes:     map[string]bool{"TEST": true},
+		CleanupEnabled:      true,
+		CleanupHour:         3,
+		CleanupMinute:       45,
 	}
 
 	// Test all fields are set correctly

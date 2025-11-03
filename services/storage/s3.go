@@ -292,15 +292,7 @@ func (s *S3Storage) List(prefix string) ([]string, error) {
 			return nil, fmt.Errorf("failed to list objects in S3: %w", err)
 		}
 
-		// Collect object keys
-		for _, obj := range output.Contents {
-			if obj.Key != nil {
-				// Skip version metadata files (not applicable in S3, but keep pattern consistent)
-				if !strings.HasSuffix(*obj.Key, ".version") {
-					results = append(results, *obj.Key)
-				}
-			}
-		}
+		results = append(results, filterKeys(output.Contents)...)
 
 		// Check if there are more results
 		if !aws.ToBool(output.IsTruncated) {
@@ -311,6 +303,25 @@ func (s *S3Storage) List(prefix string) ([]string, error) {
 	}
 
 	return results, nil
+}
+
+func filterKeys(objects []types.Object) []string {
+	var keys []string
+
+	for _, obj := range objects {
+		if obj.Key == nil {
+			continue
+		}
+
+		key := *obj.Key
+		if strings.HasSuffix(key, ".version") {
+			continue
+		}
+
+		keys = append(keys, key)
+	}
+
+	return keys
 }
 
 // getVersion retrieves the version metadata for an object
@@ -339,6 +350,43 @@ func (s *S3Storage) GetVersion(path string) (int, error) {
 	}
 
 	return version, nil
+}
+
+// DeleteTree removes all objects stored under the given prefix.
+func (s *S3Storage) DeleteTree(prefix string) error {
+	if strings.TrimSpace(prefix) == "" {
+		return fmt.Errorf("prefix is required for DeleteTree")
+	}
+
+	normalized := strings.TrimPrefix(prefix, "/")
+
+	objects, err := s.List(normalized)
+	if err != nil {
+		return fmt.Errorf("failed to list objects for deletion: %w", err)
+	}
+
+	ctx := context.Background()
+
+	for _, key := range objects {
+		if _, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(s.bucket),
+			Key:    aws.String(key),
+		}); err != nil {
+			return fmt.Errorf("failed to delete object %s: %w", key, err)
+		}
+	}
+
+	trimmed := strings.TrimSuffix(normalized, "/")
+	if trimmed != "" {
+		if _, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(s.bucket),
+			Key:    aws.String(trimmed),
+		}); err != nil {
+			return fmt.Errorf("failed to delete prefix object %s: %w", trimmed, err)
+		}
+	}
+
+	return nil
 }
 
 // Verify S3Storage implements Storage interface

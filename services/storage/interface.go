@@ -29,4 +29,8 @@ type Storage interface {
 	// GetVersion retrieves the current version number of a file.
 	// Returns 0 if file doesn't exist, current version if exists, and any error encountered.
 	GetVersion(path string) (int, error)
+
+	// DeleteTree removes all files under the given path prefix.
+	// Implementations must support deleting nested directories or object prefixes.
+	DeleteTree(prefix string) error
 }

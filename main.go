@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/unknovs/status-list-go/app"
+	"github.com/unknovs/status-list-go/cleanup"
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/renewal"
 )
@@ -89,6 +90,7 @@ func runServer() error {
 
 	application := app.NewApp(cfg)
 	renewal.StartRenewalThread(cfg, application.Storage())
+	cleanup.StartCleanupWorker(cfg, application.Storage())
 
 	return application.Run()
 }

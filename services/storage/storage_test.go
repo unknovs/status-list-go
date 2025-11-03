@@ -39,3 +39,7 @@ func (m *mockStorage) List(prefix string) ([]string, error) {
 func (m *mockStorage) GetVersion(path string) (int, error) {
 	return 0, nil
 }
+
+func (m *mockStorage) DeleteTree(prefix string) error {
+	return nil
+}
