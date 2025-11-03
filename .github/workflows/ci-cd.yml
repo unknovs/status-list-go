@@ -83,6 +83,7 @@ jobs:
           file: ./coverage.out
           flags: unittests
           name: codecov-umbrella
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   build:
     needs: test
