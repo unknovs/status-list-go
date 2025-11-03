@@ -17,76 +17,96 @@ limitations under the License.
 package main
 
 import (
-	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/unknovs/status-list-go/app"
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/renewal"
-	"github.com/unknovs/status-list-go/services/storage"
+)
+
+var (
+	version         string
+	healthCheckFlag bool
 )
 
 func main() {
-	// Parse command line flags
-	healthCheck := flag.Bool("health-check", false, "Perform health check and exit")
-	flag.Parse()
+	rootCmd := newRootCommand()
+	rootCmd.Version = version
+	rootCmd.SilenceUsage = true
+	rootCmd.SilenceErrors = true
 
-	// If health check flag is set, perform health check and exit
-	if *healthCheck {
-		performHealthCheck()
-		return
-	}
-
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
-	}
-
-	// Initialize storage backend
-	stor, err := storage.NewStorage(cfg)
-	if err != nil {
-		log.Fatalf("Failed to initialize storage backend: %v", err)
-	}
-	log.Printf("Initialized storage backend: %s", cfg.BackendType)
-
-	// Start renewal thread with storage backend
-	renewal.StartRenewalThread(cfg, stor)
-
-	// Create and start the application
-	application := app.NewApp(cfg)
-	if err := application.Run(); err != nil {
-		log.Fatalf("Failed to start application: %v", err)
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }
 
-// performHealthCheck performs a health check by attempting to connect to the service
+func newRootCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "status-list",
+		Short: "Status List Service",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if healthCheckFlag {
+				performHealthCheck()
+				return nil
+			}
+
+			return runServer()
+		},
+	}
+
+	cmd.Flags().BoolVar(&healthCheckFlag, "health-check", false, "Perform a health check and exit")
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "serve",
+		Short: "Run the HTTP server",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return runServer()
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "health",
+		Short: "Perform a health check",
+		Run: func(cmd *cobra.Command, _ []string) {
+			performHealthCheck()
+		},
+	})
+
+	return cmd
+}
+
+func runServer() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	application := app.NewApp(cfg)
+	renewal.StartRenewalThread(cfg, application.Storage())
+
+	return application.Run()
+}
+
 func performHealthCheck() {
-	// Get the service URL from environment or use default
 	serviceURL := os.Getenv("SERVICE_URL")
 	if serviceURL == "" {
 		serviceURL = "http://localhost:8080"
 	}
 
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-
-	// Try to connect to the health endpoint
-	healthURL := serviceURL + "/health"
-	resp, err := client.Get(healthURL)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(serviceURL + "/health")
 	if err != nil {
 		fmt.Printf("Health check failed: %v\n", err)
 		os.Exit(1)
 	}
 	defer resp.Body.Close()
 
-	// Check if the response status is OK
 	if resp.StatusCode != http.StatusOK {
 		fmt.Printf("Health check failed: HTTP %d\n", resp.StatusCode)
 		os.Exit(1)

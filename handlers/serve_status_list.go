@@ -35,8 +35,14 @@ func (h *StatusListHandler) ServeStatusList(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Parse path: /token_status_list/{country}/{doctype}/{id}
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/token_status_list/"), "/")
+	// Normalize path by stripping configured base path when present.
+	path, ok := normalizeStatusListPath(r.URL.Path, h.config.BasePath)
+	if !ok {
+		WriteError(w, http.StatusBadRequest, ErrInvalidPath)
+		return
+	}
+
+	parts := strings.Split(path, "/")
 	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
 		WriteError(w, http.StatusBadRequest, ErrInvalidPath)
 		return
@@ -100,4 +106,21 @@ func (h *StatusListHandler) ServeStatusList(w http.ResponseWriter, r *http.Reque
 		// Log error but don't send response as headers are already written
 		return
 	}
+}
+
+func normalizeStatusListPath(rawPath, basePath string) (string, bool) {
+	path := rawPath
+	if basePath != "" && strings.HasPrefix(path, basePath) {
+		path = strings.TrimPrefix(path, basePath)
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+	}
+
+	if !strings.HasPrefix(path, "/token_status_list/") {
+		return "", false
+	}
+
+	trimmed := strings.TrimPrefix(path, "/token_status_list/")
+	return trimmed, true
 }

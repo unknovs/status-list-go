@@ -264,15 +264,21 @@ func (h *StatusListHandler) SetIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pathParts := strings.Split(parsedURL.Path, "/")
-	if len(pathParts) < 5 {
+	normalizedPath, ok := normalizeStatusListPath(parsedURL.Path, h.config.BasePath)
+	if !ok {
 		WriteError(w, http.StatusBadRequest, ErrInvalidURI)
 		return
 	}
 
-	country := pathParts[2]
-	doctype := pathParts[3]
-	listID := pathParts[4]
+	pathParts := strings.Split(normalizedPath, "/")
+	if len(pathParts) != 3 {
+		WriteError(w, http.StatusBadRequest, ErrInvalidURI)
+		return
+	}
+
+	country := pathParts[0]
+	doctype := pathParts[1]
+	listID := pathParts[2]
 
 	// Validate extracted values
 	if !h.config.ValidateCountry(country) {

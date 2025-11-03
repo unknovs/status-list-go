@@ -274,6 +274,31 @@ func TestServeStatusList(t *testing.T) {
 	}
 }
 
+func TestServeStatusListWithBasePath(t *testing.T) {
+	cfg, tempDir, stor := setupTestConfig(t)
+	defer os.RemoveAll(tempDir)
+
+	cfg.BasePath = config.NormalizeBasePath("/status-list/")
+	handler := NewStatusListHandler(cfg, stor)
+
+	jwtContent := "jwt-content"
+	createTestStatusFile(t, tempDir, "LV", "PID", "test123", "token_status_list.jwt", jwtContent)
+
+	req := httptest.NewRequest("GET", "/status-list/token_status_list/LV/PID/test123", nil)
+	req.Header.Set("Accept", "application/statuslist+jwt")
+
+	rr := httptest.NewRecorder()
+	handler.ServeStatusList(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	if body := strings.TrimSpace(rr.Body.String()); body != jwtContent {
+		t.Fatalf("expected body %s, got %s", jwtContent, body)
+	}
+}
+
 func TestServeStatusListResponseHeaders(t *testing.T) {
 	cfg, tempDir, stor := setupTestConfig(t)
 	defer os.RemoveAll(tempDir)
