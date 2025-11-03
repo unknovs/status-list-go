@@ -70,6 +70,11 @@ func NewS3Storage(cfg S3Config) (*S3Storage, error) {
 			o.BaseEndpoint = aws.String(cfg.Endpoint)
 			// Use path-style addressing for S3-compatible services
 			o.UsePathStyle = true
+
+			// MinIO and other S3-compatible services often omit checksum headers, so only
+			// validate when explicitly requested and suppress the corresponding warning.
+			o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
+			o.DisableLogOutputChecksumValidationSkipped = true
 		}
 	})
 
