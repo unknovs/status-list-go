@@ -76,16 +76,6 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log request (without sensitive headers)
-	safeHeaders := make(map[string][]string)
-	for k, v := range r.Header {
-		// Skip sensitive headers
-		if k != APIKeyHeader && k != "Authorization" {
-			safeHeaders[k] = v
-		}
-	}
-	log.Printf("Take Request, headers: %v", safeHeaders)
-
 	// Validate API key
 	apiKey := r.Header.Get(APIKeyHeader)
 	if apiKey != h.config.APIKey {
