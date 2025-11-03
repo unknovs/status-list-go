@@ -20,6 +20,7 @@ import (
 	"log"
 
 	"azugo.io/azugo"
+	azugoconfig "azugo.io/azugo/config"
 	"azugo.io/azugo/server"
 	"github.com/valyala/fasthttp"
 
@@ -52,11 +53,10 @@ func NewApp(cfg *config.Config) *App {
 
 	statusHandler := handlers.NewStatusListHandler(cfg, stor)
 
-	srvCfg := newServerConfiguration()
 	azApp, err := server.New(nil, server.Options{
 		AppName:       serviceName,
 		AppVer:        defaultVersion,
-		Configuration: srvCfg,
+		Configuration: azugoconfig.New(),
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize Azugo application: %v", err)

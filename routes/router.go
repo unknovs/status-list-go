@@ -25,34 +25,90 @@ func Init(app *azugo.App, cfg *config.Config, handler *handlers.StatusListHandle
 		}
 	}
 
+	basePath := config.NormalizeBasePath(cfg.BasePath)
+	if cfg.BasePath != basePath {
+		cfg.BasePath = basePath
+	}
+
+	register := func(method, path string, h azugo.RequestHandler, includeFallback bool) {
+		add := func(route string) {
+			switch method {
+			case fasthttp.MethodGet:
+				app.Get(route, h)
+			case fasthttp.MethodPost:
+				app.Post(route, h)
+			default:
+				panic("unsupported HTTP method")
+			}
+		}
+
+		add(path)
+
+		if !includeFallback || basePath == "" {
+			return
+		}
+
+		if !strings.HasPrefix(path, basePath) {
+			return
+		}
+
+		trimmed := strings.TrimPrefix(path, basePath)
+		if trimmed == "" {
+			trimmed = "/"
+		} else if !strings.HasPrefix(trimmed, "/") {
+			trimmed = "/" + trimmed
+		}
+
+		if trimmed == path {
+			return
+		}
+
+		add(trimmed)
+	}
+
+	// Helper function to add base path prefix
+	prefix := func(path string) string {
+		if basePath != "" && !strings.HasPrefix(path, basePath) {
+			return basePath + path
+		}
+		return path
+	}
+
 	// REST API routes
-	app.Post("/token_status_list/take", adapt(http.HandlerFunc(handler.TakeIndex)))
-	app.Get("/token_status_list/get", adapt(http.HandlerFunc(handler.GetIndex)))
-	app.Post("/token_status_list/set", adapt(http.HandlerFunc(handler.SetIndex)))
-	app.Get("/token_status_list/{country}/{doctype}/{id}", adapt(http.HandlerFunc(handler.ServeStatusList)))
+	register(fasthttp.MethodPost, prefix("/token_status_list/take"), adapt(http.HandlerFunc(handler.TakeIndex)), true)
+	register(fasthttp.MethodGet, prefix("/token_status_list/get"), adapt(http.HandlerFunc(handler.GetIndex)), true)
+	register(fasthttp.MethodPost, prefix("/token_status_list/set"), adapt(http.HandlerFunc(handler.SetIndex)), true)
+	register(fasthttp.MethodGet, prefix("/token_status_list/{country}/{doctype}/{id}"), adapt(http.HandlerFunc(handler.ServeStatusList)), true)
 
 	// Static assets
-	staticHandler := http.StripPrefix("/token_status_list/static/", http.FileServer(http.Dir(resolveStaticDir())))
-	app.Get("/token_status_list/static/{path:*}", adapt(staticHandler))
+	staticDir := http.Dir(resolveStaticDir())
+	staticBasePrefix := prefix("/token_status_list/static/")
+	staticHandler := http.StripPrefix(staticBasePrefix, http.FileServer(staticDir))
+	register(fasthttp.MethodGet, prefix("/token_status_list/static/{path:*}"), adapt(staticHandler), false)
+	if basePath != "" {
+		fallbackStaticHandler := http.StripPrefix("/token_status_list/static/", http.FileServer(staticDir))
+		register(fasthttp.MethodGet, "/token_status_list/static/{path:*}", adapt(fallbackStaticHandler), false)
+	}
 
 	// Swagger assets
-	app.Get("/token_status_list/swagger", adapt(http.HandlerFunc(swaggerIndex)))
-	app.Get("/token_status_list/swagger/swagger.json", adapt(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	register(fasthttp.MethodGet, prefix("/token_status_list/swagger"), adapt(http.HandlerFunc(swaggerIndex)), true)
+	register(fasthttp.MethodGet, prefix("/token_status_list/swagger/swagger.json"), adapt(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		serveSwaggerJSON(w, r, cfg)
-	})))
+	})), true)
 
 	// Health route using native Azugo handler to avoid adapter overhead.
-	app.Get("/health", func(ctx *azugo.Context) {
+	healthHandler := func(ctx *azugo.Context) {
 		ctx.SkipRequestLog()
 		ctx.StatusCode(fasthttp.StatusOK)
 		ctx.JSON(map[string]string{"status": "healthy"})
-	})
+	}
+	register(fasthttp.MethodGet, prefix("/health"), healthHandler, true)
 
 	// Root index mirrors old behaviour.
-	app.Get("/", func(ctx *azugo.Context) {
+	register(fasthttp.MethodGet, prefix("/"), func(ctx *azugo.Context) {
 		ctx.StatusCode(fasthttp.StatusOK)
 		ctx.Text("OK")
-	})
+	}, true)
 
 	return nil
 }
@@ -179,6 +235,19 @@ func buildSwaggerServers(cfg *config.Config, r *http.Request) []map[string]inter
 		}
 		servers = append(servers, map[string]interface{}{
 			"url": baseURL + prefix + "/",
+		})
+
+		return servers
+	}
+
+	// Use BasePath if SwaggerURLPrefix is not set
+	if basePath := cfg.BasePath; basePath != "" {
+		baseURL := strings.TrimSuffix(cfg.ServiceURL, "/")
+		if !strings.HasPrefix(basePath, "/") {
+			basePath = "/" + basePath
+		}
+		servers = append(servers, map[string]interface{}{
+			"url": baseURL + basePath + "/",
 		})
 
 		return servers

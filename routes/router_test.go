@@ -60,9 +60,16 @@ func newTestConfig(t *testing.T) *appconfig.Config {
 func setupTestApp(t *testing.T) *azugo.App {
 	t.Helper()
 
-	t.Setenv("METRICS_ENABLED", "false")
-
 	cfg := newTestConfig(t)
+	return setupTestAppWithConfig(t, cfg)
+}
+
+func setupTestAppWithConfig(t *testing.T, cfg *appconfig.Config) *azugo.App {
+	t.Helper()
+
+	t.Setenv("METRICS_ENABLED", "false")
+	cfg.BasePath = appconfig.NormalizeBasePath(cfg.BasePath)
+
 	stor, err := storage.NewStorage(cfg)
 	if err != nil {
 		t.Fatalf("failed to create storage: %v", err)
@@ -255,6 +262,51 @@ func TestInitRoutes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestHealthEndpointWithBasePath(t *testing.T) {
+	cfg := newTestConfig(t)
+	cfg.BasePath = "/status-list"
+	app := setupTestAppWithConfig(t, cfg)
+
+	paths := []string{"/health", "/status-list/health"}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			resp := executeRequest(t, app, fasthttp.MethodGet, path, nil)
+			if got, want := resp.StatusCode(), fasthttp.StatusOK; got != want {
+				t.Fatalf("expected status %d for %s, got %d", want, path, got)
+			}
+		})
+	}
+}
+
+func TestTakeEndpointWithBasePath(t *testing.T) {
+	cfg := newTestConfig(t)
+	cfg.BasePath = "/status-list"
+	app := setupTestAppWithConfig(t, cfg)
+
+	headers := map[string]string{"X-API-Key": cfg.APIKey}
+	for _, path := range []string{"/status-list/token_status_list/take", "/token_status_list/take"} {
+		resp := executeRequest(t, app, fasthttp.MethodPost, path, headers)
+		if got, want := resp.StatusCode(), fasthttp.StatusBadRequest; got != want {
+			t.Fatalf("expected status %d for %s, got %d", want, path, got)
+		}
+	}
+}
+
+func TestTakeEndpointWithTrailingSlashBasePath(t *testing.T) {
+	cfg := newTestConfig(t)
+	cfg.BasePath = "/status-list/"
+	app := setupTestAppWithConfig(t, cfg)
+
+	headers := map[string]string{"X-API-Key": cfg.APIKey}
+	for _, path := range []string{"/status-list/token_status_list/take", "/token_status_list/take"} {
+		resp := executeRequest(t, app, fasthttp.MethodPost, path, headers)
+		if got, want := resp.StatusCode(), fasthttp.StatusBadRequest; got != want {
+			t.Fatalf("expected status %d for %s, got %d", want, path, got)
+		}
 	}
 }
 

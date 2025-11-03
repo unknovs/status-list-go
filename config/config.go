@@ -27,6 +27,7 @@ type Config struct {
 	APIKey              string
 	ServiceURL          string
 	SwaggerURLPrefix    string
+	BasePath            string // Base path for all routes (e.g., "/api")
 	TokenStatusListSize int
 	StatusListDir       string
 	BackupDir           string
@@ -55,7 +56,8 @@ func Load() (*Config, error) {
 	config := &Config{
 		APIKey:              getEnv("API_KEY", "test"),
 		ServiceURL:          getEnv("SERVICE_URL", "http://localhost:8080/"),
-		SwaggerURLPrefix:    getEnv("SWAGGER_URL_PREFIX", ""), // Empty means use ServiceURL as base, e.g., "/api"
+		SwaggerURLPrefix:    getEnv("SWAGGER_URL_PREFIX", ""),           // Empty means use ServiceURL as base, e.g., "/api"
+		BasePath:            NormalizeBasePath(getEnv("BASE_PATH", "")), // Base path for all routes (e.g., "/api")
 		TokenStatusListSize: 10000,
 		StatusListDir:       getEnv("STATUS_LIST_DIR", "/var/opt/status_lists"),
 		BackupDir:           getEnv("BACKUP_DIR", "/var/opt/status_list_backup"),
@@ -106,6 +108,25 @@ func getEnv(key, defaultValue string) string {
 	}
 	// Fall back to default value if environment variable is not set or empty
 	return defaultValue
+}
+
+// NormalizeBasePath ensures configured base paths are canonicalized to a leading slash and no trailing slash.
+func NormalizeBasePath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" || trimmed == "/" {
+		return ""
+	}
+
+	if !strings.HasPrefix(trimmed, "/") {
+		trimmed = "/" + trimmed
+	}
+
+	trimmed = strings.TrimRight(trimmed, "/")
+	if trimmed == "" {
+		return ""
+	}
+
+	return trimmed
 }
 
 func getEnvPath(key, defaultValue string) string {

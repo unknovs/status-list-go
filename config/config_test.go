@@ -80,6 +80,32 @@ func TestGetEnv(t *testing.T) {
 	}
 }
 
+func TestNormalizeBasePath(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "empty", input: "", expected: ""},
+		{name: "root", input: "/", expected: ""},
+		{name: "no leading slash", input: "api", expected: "/api"},
+		{name: "leading slash", input: "/api", expected: "/api"},
+		{name: "trailing slash", input: "/api/", expected: "/api"},
+		{name: "multiple trailing", input: "/api///", expected: "/api"},
+		{name: "internal path", input: "api/v1", expected: "/api/v1"},
+		{name: "whitespace", input: "  /api/v1/  ", expected: "/api/v1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := NormalizeBasePath(tt.input)
+			if result != tt.expected {
+				t.Fatalf("NormalizeBasePath(%q) = %q, expected %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestGetEnvArray(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -471,6 +497,7 @@ func TestLoad(t *testing.T) {
 		// Set custom environment variables
 		os.Setenv("API_KEY", "custom_api_key")
 		os.Setenv("SERVICE_URL", "https://example.com:9000/")
+		os.Setenv("BASE_PATH", "status-list/")
 		os.Setenv("STATUS_LIST_DIR", filepath.Join(tempDir, "custom_status_lists"))
 		os.Setenv("BACKUP_DIR", filepath.Join(tempDir, "custom_backup"))
 		os.Setenv("LOG_DIR", filepath.Join(tempDir, "custom_logs"))
@@ -503,6 +530,10 @@ func TestLoad(t *testing.T) {
 
 		if config.CountryCode != "EE" {
 			t.Errorf("Expected CountryCode 'EE', got '%s'", config.CountryCode)
+		}
+
+		if config.BasePath != "/status-list" {
+			t.Errorf("Expected BasePath '/status-list', got '%s'", config.BasePath)
 		}
 
 		// Test custom doctypes
