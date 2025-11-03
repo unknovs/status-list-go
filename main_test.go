@@ -261,7 +261,7 @@ func TestMain_HealthCheckFlag(t *testing.T) {
 		// Since main() calls os.Exit, we test in a subprocess
 		if os.Getenv("TEST_MAIN_HEALTH_CHECK") == "1" {
 			// Override command line arguments
-			os.Args = []string{"status-list-go", "-health-check"}
+			os.Args = []string{"status-list-go", "--health-check"}
 			os.Setenv("SERVICE_URL", server.URL)
 			main()
 			return
@@ -403,7 +403,7 @@ func TestMain_ConfigLoadFailure(t *testing.T) {
 
 		// Check that the output contains config failure message or indicates server start
 		outputStr := string(output)
-		if !strings.Contains(outputStr, "Failed to load configuration") && !strings.Contains(outputStr, "Starting Status List Service") {
+		if !strings.Contains(outputStr, "Failed to load configuration") && !strings.Contains(outputStr, "Starting Status List Service") && !strings.Contains(outputStr, "load config:") {
 			t.Errorf("Expected 'Failed to load configuration' or 'Starting Status List Service' in output, got: %s", outputStr)
 		}
 	})

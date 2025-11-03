@@ -64,8 +64,8 @@ func Load() (*Config, error) {
 		// Certificate configuration from environment or Docker secrets
 		// PrivKeyPath: getEnv("PRIVATE_KEY_PATH", "/run/secrets/private_key"),
 		// CertPath:    getEnv("CERTIFICATE_PATH", "/run/secrets/certificate"),
-		PrivKeyPath: getEnv("PRIVATE_KEY_PATH", "temp/private_key/decrypted_key.pem"),
-		CertPath:    getEnv("CERTIFICATE_PATH", "temp/certificate/PID-DS-0002.cert.der"),
+		PrivKeyPath: getEnvPath("PRIVATE_KEY_PATH", "temp/private_key/decrypted_key.pem"),
+		CertPath:    getEnvPath("CERTIFICATE_PATH", "temp/certificate/PID-DS-0002.cert.der"),
 		CountryCode: getEnv("COUNTRY_CODE", "LV"),
 
 		// Storage configuration
@@ -105,6 +105,13 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	// Fall back to default value if environment variable is not set or empty
+	return defaultValue
+}
+
+func getEnvPath(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
 	return defaultValue
 }
 
