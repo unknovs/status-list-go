@@ -223,6 +223,17 @@ func (lm *ListManager) LoadList(uri string) (*models.StatusListData, error) {
 
 	// Construct path relative to storage root (remove leading slash)
 	relativePath := strings.TrimPrefix(parsedURI.Path, "/")
+
+	if lm.config.BasePath != "" {
+		trimmedBase := strings.TrimPrefix(lm.config.BasePath, "/")
+		if trimmedBase != "" {
+			if relativePath == trimmedBase {
+				relativePath = ""
+			} else if strings.HasPrefix(relativePath, trimmedBase+"/") {
+				relativePath = strings.TrimPrefix(relativePath, trimmedBase+"/")
+			}
+		}
+	}
 	folderPath := filepath.Join(relativePath, FullListJSONFile)
 
 	jsonData, err := lm.storage.Read(folderPath)
