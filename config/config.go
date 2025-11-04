@@ -59,33 +59,39 @@ func Load() (*Config, error) {
 
 	config := &Config{
 		APIKey:              getEnv("API_KEY", "test"),
-		ServiceURL:          getEnv("SERVICE_URL", "http://localhost:8080/"),
-		SwaggerURLPrefix:    getEnv("SWAGGER_URL_PREFIX", ""),           // Empty means use ServiceURL as base, e.g., "/api"
-		BasePath:            NormalizeBasePath(getEnv("BASE_PATH", "")), // Base path for all routes (e.g., "/api")
+		ServiceURL:          getEnv("SERVICE_URL", "http://localhost:8080/"), // from this value, Status List URL is derived
+		SwaggerURLPrefix:    getEnv("SWAGGER_URL_PREFIX", ""),                // Empty means use ServiceURL as base, e.g., "/api"
+		BasePath:            NormalizeBasePath(getEnv("BASE_PATH", "")),      // Base path for all routes (e.g., "/api")
 		TokenStatusListSize: 10000,
-		StatusListDir:       getEnv("STATUS_LIST_DIR", "/var/opt/status_lists"),
-		BackupDir:           getEnv("BACKUP_DIR", "/var/opt/status_list_backup"),
-		LogDir:              getEnv("LOG_DIR", "/tmp/status_lists"),
-		CleanupEnabled:      getEnvBool("STATUS_LIST_CLEANUP_ENABLED", true),
-		CleanupHour:         normalizeHour(getEnvInt("STATUS_LIST_CLEANUP_HOUR", 2)),
-		CleanupMinute:       normalizeMinute(getEnvInt("STATUS_LIST_CLEANUP_MINUTE", 0)),
+
+		// STATUS_LIST_STORAGE=local configuration, local filesystem storage.
+		// Backups are not implemented, shall be done externally, on infrastructure level if needed.
+		StatusListDir: getEnv("STATUS_LIST_DIR", "/var/opt/status_lists"),
+		BackupDir:     getEnv("BACKUP_DIR", "/var/opt/status_list_backup"),
+		LogDir:        getEnv("LOG_DIR", "/tmp/status_lists"),
+
+		// Expired status list cleanup service configuration
+		CleanupEnabled: getEnvBool("STATUS_LIST_CLEANUP_ENABLED", true),
+		CleanupHour:    normalizeHour(getEnvInt("STATUS_LIST_CLEANUP_HOUR", 2)),     // Default to 2 AM. Normalize to valid hour (value between 0-23)
+		CleanupMinute:  normalizeMinute(getEnvInt("STATUS_LIST_CLEANUP_MINUTE", 0)), // Default to 0 minutes. Normalize to valid minute (value between 0-59)
 
 		// Certificate configuration from environment or Docker secrets
 		// PrivKeyPath: getEnv("PRIVATE_KEY_PATH", "/run/secrets/private_key"),
 		// CertPath:    getEnv("CERTIFICATE_PATH", "/run/secrets/certificate"),
 		PrivKeyPath: getEnvPath("PRIVATE_KEY_PATH", "temp/private_key/decrypted_key.pem"),
 		CertPath:    getEnvPath("CERTIFICATE_PATH", "temp/certificate/PID-DS-0002.cert.der"),
-		CountryCode: getEnv("COUNTRY_CODE", "LV"),
 
 		// Storage configuration
-		BackendType:       getEnv("STATUS_LIST_STORAGE", "local"),
+		BackendType:       getEnv("STATUS_LIST_STORAGE", "local"), // "local" or "s3", default to "local" for local filesystem storage
 		S3Bucket:          getEnv("S3_BUCKET", ""),
 		S3Region:          getEnv("S3_REGION", "us-east-1"),
 		S3AccessKeyID:     getEnv("S3_ACCESS_KEY_ID", ""),
 		S3SecretAccessKey: getEnv("S3_SECRET_ACCESS_KEY", ""),
 		S3Endpoint:        getEnv("S3_ENDPOINT", ""),
 
+		// Allowed document types (reads `,` separated values) and country code (supports one country code, if needed can be extended to multiple using `getEnvArray`)
 		AllowedDoctypes: getAllowedDoctypes(),
+		CountryCode:     getEnv("COUNTRY_CODE", "LV"), // Default to Latvia (LV)
 	}
 
 	// Ensure directories exist
