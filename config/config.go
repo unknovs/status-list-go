@@ -58,10 +58,12 @@ func Load() (*Config, error) {
 	log.Println("Loading configuration from environment variables")
 
 	config := &Config{
-		APIKey:              getEnv("API_KEY", "test"),
-		ServiceURL:          getEnv("SERVICE_URL", "http://localhost:8080/"), // from this value, Status List URL is derived
-		SwaggerURLPrefix:    getEnv("SWAGGER_URL_PREFIX", ""),                // Empty means use ServiceURL as base, e.g., "/api"
-		BasePath:            NormalizeBasePath(getEnv("BASE_PATH", "")),      // Base path for all routes (e.g., "/api")
+		APIKey:           getEnv("API_KEY", "test"),
+		ServiceURL:       getEnv("SERVICE_URL", "http://localhost:8080/"), // from this value, Status List URL is derived
+		SwaggerURLPrefix: getEnv("SWAGGER_URL_PREFIX", ""),                // Empty means use ServiceURL as base, e.g., "/api"
+		BasePath:         NormalizeBasePath(getEnv("BASE_PATH", "")),      // Base path for all routes (e.g., "/api")
+
+		// Maximum number of entries (tokens) that a single status list can hold before a new list needs to be created.
 		TokenStatusListSize: 10000,
 
 		// STATUS_LIST_STORAGE=local configuration, local filesystem storage.
@@ -89,7 +91,8 @@ func Load() (*Config, error) {
 		S3SecretAccessKey: getEnv("S3_SECRET_ACCESS_KEY", ""),
 		S3Endpoint:        getEnv("S3_ENDPOINT", ""),
 
-		// Allowed document types (reads `,` separated values) and country code (supports one country code, if needed can be extended to multiple using `getEnvArray`)
+		// Allowed document types (reads `,` separated values)
+		// and country code (supports one country code, if needed can be extended to multiple using `getEnvArray`)
 		AllowedDoctypes: getAllowedDoctypes(),
 		CountryCode:     getEnv("COUNTRY_CODE", "LV"), // Default to Latvia (LV)
 	}

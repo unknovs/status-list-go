@@ -10,10 +10,11 @@ services:
     environment:
       # Basic configuration
       API_KEY: "local-dev-key" # X-API-Key
-      SERVICE_URL: "http://localhost:8080/"
+      SERVICE_URL: "http://localhost:8080/api"
       # SWAGGER_URL_PREFIX: "/api"  # Only set this in production when behind a proxy that strips /api prefix
       COUNTRY_CODE: "LV"
-
+      BASE_PATH: "/api"
+    
       # Directory paths (using container paths)
       STATUS_LIST_DIR: "/var/opt/status_lists"
       BACKUP_DIR: "/var/opt/status_list_backup"
