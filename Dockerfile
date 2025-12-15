@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY go.mod go.sum ./
 
-RUN apk --no-cache add ca-certificates git tzdata && \ 
+RUN apk --no-cache --no-scripts add ca-certificates git tzdata && \
     go mod download && \
     go generate ./...
 
