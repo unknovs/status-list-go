@@ -1,6 +1,6 @@
 module github.com/unknovs/status-list-go
 
-go 1.25.3
+go 1.25.5
 
 require (
 	azugo.io/azugo v0.25.2
