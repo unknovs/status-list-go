@@ -209,8 +209,12 @@ func (rs *RenewalService) writeOrCreateFile(path string, content []byte) error {
 	}
 
 	if exists {
-		// For simplicity, we'll use version 2 for updates
-		return rs.storage.Write(path, content, 2)
+		// Get current version and increment it
+		currentVersion, err := rs.storage.GetVersion(path)
+		if err != nil {
+			return fmt.Errorf("failed to get current version: %w", err)
+		}
+		return rs.storage.Write(path, content, currentVersion+1)
 	}
 
 	return rs.storage.Create(path, content)

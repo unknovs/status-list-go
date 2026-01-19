@@ -23,7 +23,7 @@ RUN mkdir -p publish/etc/ssl/certs/ && \
     cp -R /usr/share/zoneinfo publish/usr/share/ && \
     cp -R static/* publish/static/ 2>/dev/null || echo "No static files found"
 
-FROM scratch
+FROM ghcr.io/wntrtech/scratch:latest
 WORKDIR /
 COPY --from=build app/publish/ ./
 EXPOSE 8080/tcp
