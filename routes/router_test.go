@@ -17,6 +17,15 @@ import (
 	"github.com/unknovs/status-list-go/services/storage"
 )
 
+const (
+	testSwaggerPath = "/token_status_list/swagger"
+	testGetPath     = "/token_status_list/get"
+	testTakePath    = "/token_status_list/take"
+	testSetPath     = "/token_status_list/set"
+	testStatusPath  = "/token_status_list/LV/PID/test123"
+	testStaticPath  = "/token_status_list/static/test.txt"
+)
+
 func newTestConfig(t *testing.T) *appconfig.Config {
 	t.Helper()
 
@@ -45,6 +54,7 @@ func newTestConfig(t *testing.T) *appconfig.Config {
 		APIKey:              "test-api-key",
 		ServiceURL:          "http://localhost:8080/",
 		SwaggerURLPrefix:    "",
+		ServiceMode:         "internal", // Default to internal for tests
 		TokenStatusListSize: 10,
 		StatusListDir:       statusDir,
 		BackupDir:           backupDir,
@@ -172,7 +182,7 @@ func TestInitRoutes(t *testing.T) {
 		{
 			name:           "Swagger UI endpoint",
 			method:         fasthttp.MethodGet,
-			path:           "/token_status_list/swagger",
+			path:           testSwaggerPath,
 			headers:        nil,
 			expectedStatus: fasthttp.StatusOK,
 			checkBody:      false,
@@ -181,7 +191,7 @@ func TestInitRoutes(t *testing.T) {
 		{
 			name:           "Swagger JSON endpoint - not found",
 			method:         fasthttp.MethodGet,
-			path:           "/token_status_list/swagger/swagger.json",
+			path:           testSwaggerPath + "/swagger.json",
 			headers:        nil,
 			expectedStatus: fasthttp.StatusNotFound,
 			checkBody:      false,
@@ -190,7 +200,7 @@ func TestInitRoutes(t *testing.T) {
 		{
 			name:           "Take endpoint - POST",
 			method:         fasthttp.MethodPost,
-			path:           "/token_status_list/take",
+			path:           testTakePath,
 			headers:        map[string]string{"X-API-Key": "test-api-key"},
 			expectedStatus: fasthttp.StatusBadRequest, // Will fail validation but route exists
 			checkBody:      false,
@@ -199,7 +209,7 @@ func TestInitRoutes(t *testing.T) {
 		{
 			name:           "Get endpoint - GET",
 			method:         fasthttp.MethodGet,
-			path:           "/token_status_list/get",
+			path:           testGetPath,
 			headers:        map[string]string{"X-API-Key": "test-api-key"},
 			expectedStatus: fasthttp.StatusBadRequest, // Will fail validation but route exists
 			checkBody:      false,
@@ -208,7 +218,7 @@ func TestInitRoutes(t *testing.T) {
 		{
 			name:           "Set endpoint - POST",
 			method:         fasthttp.MethodPost,
-			path:           "/token_status_list/set",
+			path:           testSetPath,
 			headers:        map[string]string{"X-API-Key": "test-api-key"},
 			expectedStatus: fasthttp.StatusBadRequest, // Will fail validation but route exists
 			checkBody:      false,
@@ -217,7 +227,7 @@ func TestInitRoutes(t *testing.T) {
 		{
 			name:           "Status list serving - GET",
 			method:         fasthttp.MethodGet,
-			path:           "/token_status_list/LV/PID/test123",
+			path:           testStatusPath,
 			headers:        nil,
 			expectedStatus: fasthttp.StatusNotFound, // File not found but route exists
 			checkBody:      false,
@@ -226,7 +236,7 @@ func TestInitRoutes(t *testing.T) {
 		{
 			name:           "Static files - GET",
 			method:         fasthttp.MethodGet,
-			path:           "/token_status_list/static/test.txt",
+			path:           testStaticPath,
 			headers:        nil,
 			expectedStatus: fasthttp.StatusNotFound, // Directory not found but route exists
 			checkBody:      false,
@@ -235,7 +245,7 @@ func TestInitRoutes(t *testing.T) {
 		{
 			name:           "OPTIONS preflight",
 			method:         fasthttp.MethodOptions,
-			path:           "/token_status_list/take",
+			path:           testTakePath,
 			headers:        nil,
 			expectedStatus: fasthttp.StatusOK,
 			checkBody:      true,
@@ -518,5 +528,80 @@ func TestForwardedURL(t *testing.T) {
 	expected = "http://example.com/api/"
 	if url != expected {
 		t.Errorf("expected %s, got %s", expected, url)
+	}
+}
+
+func TestServiceMode(t *testing.T) {
+	tests := []struct {
+		name         string
+		serviceMode  string
+		method       string
+		path         string
+		expectStatus int
+		description  string
+	}{
+		{
+			name:         "internal mode - POST take allowed",
+			serviceMode:  "internal",
+			method:       fasthttp.MethodPost,
+			path:         testTakePath,
+			expectStatus: fasthttp.StatusUnauthorized, // Will hit API key check first (401)
+			description:  "Internal mode should register POST endpoints",
+		},
+		{
+			name:         "public mode - POST take not registered",
+			serviceMode:  "public",
+			method:       fasthttp.MethodPost,
+			path:         testTakePath,
+			expectStatus: fasthttp.StatusNotFound, // Endpoint not registered
+			description:  "Public mode should not register POST endpoints",
+		},
+		{
+			name:         "internal mode - GET allowed",
+			serviceMode:  "internal",
+			method:       fasthttp.MethodGet,
+			path:         testGetPath,
+			expectStatus: fasthttp.StatusBadRequest, // Will fail validation but endpoint exists
+			description:  "Internal mode should register GET endpoints",
+		},
+		{
+			name:         "public mode - GET allowed",
+			serviceMode:  "public",
+			method:       fasthttp.MethodGet,
+			path:         testGetPath,
+			expectStatus: fasthttp.StatusBadRequest, // Will fail validation but endpoint exists
+			description:  "Public mode should register GET endpoints",
+		},
+		{
+			name:         "internal mode - Swagger accessible",
+			serviceMode:  "internal",
+			method:       fasthttp.MethodGet,
+			path:         testSwaggerPath,
+			expectStatus: fasthttp.StatusOK,
+			description:  "Internal mode should expose Swagger UI",
+		},
+		{
+			name:         "public mode - Swagger not accessible",
+			serviceMode:  "public",
+			method:       fasthttp.MethodGet,
+			path:         testSwaggerPath,
+			expectStatus: fasthttp.StatusNotFound,
+			description:  "Public mode should not expose Swagger UI",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := newTestConfig(t)
+			cfg.ServiceMode = tt.serviceMode
+
+			app := setupTestAppWithConfig(t, cfg)
+
+			resp := executeRequest(t, app, tt.method, tt.path, nil)
+
+			if resp.StatusCode() != tt.expectStatus {
+				t.Errorf("%s: expected status %d, got %d", tt.description, tt.expectStatus, resp.StatusCode())
+			}
+		})
 	}
 }

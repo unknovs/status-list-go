@@ -14,6 +14,10 @@ services:
       # SWAGGER_URL_PREFIX: "/api"  # Only set this in production when behind a proxy that strips /api prefix
       COUNTRY_CODE: "LV"
       BASE_PATH: "/api"
+      
+      # Service Mode: "public" (read-only, no Swagger) or "internal" (full API + Swagger)
+      # For production, run separate instances with different SERVICE_MODE values
+      SERVICE_MODE: "internal"  # Change to "public" for internet-facing read-only instances
     
       # Directory paths (using container paths)
       STATUS_LIST_DIR: "/var/opt/status_lists"
@@ -98,3 +102,51 @@ volumes:
     driver: local
   minio_data:
     driver: local
+
+# -------------------------------------------------------------------
+# Example: Dual Deployment (Public + Internal Instances)
+# -------------------------------------------------------------------
+# Uncomment to run separate public and internal instances sharing S3
+#
+#  statuslist-public:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#    ports:
+#      - "8081:8080"
+#    environment:
+#      SERVICE_MODE: "public"  # Read-only, no Swagger, no write endpoints
+#      SERVICE_URL: "http://localhost:8081/"
+#      COUNTRY_CODE: "LV"
+#      STATUS_LIST_STORAGE: "s3"
+#      S3_BUCKET: "status-lists"
+#      S3_ENDPOINT: "http://minio:9000"
+#      S3_ACCESS_KEY_ID: "minioadmin"
+#      S3_SECRET_ACCESS_KEY: "minioadmin"
+#      PRIVATE_KEY_PATH: "/app/certs/private_key/private-key.pem"
+#      CERTIFICATE_PATH: "/app/certs/certificate/certificate.pem"
+#    volumes:
+#      - ./temp:/app/certs
+#    restart: unless-stopped
+#
+#  statuslist-internal:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#    ports:
+#      - "8082:8080"
+#    environment:
+#      SERVICE_MODE: "internal"  # Full API with Swagger, write endpoints (API key required)
+#      API_KEY: "internal-secret-key"
+#      SERVICE_URL: "http://localhost:8082/"
+#      COUNTRY_CODE: "LV"
+#      STATUS_LIST_STORAGE: "s3"
+#      S3_BUCKET: "status-lists"
+#      S3_ENDPOINT: "http://minio:9000"
+#      S3_ACCESS_KEY_ID: "minioadmin"
+#      S3_SECRET_ACCESS_KEY: "minioadmin"
+#      PRIVATE_KEY_PATH: "/app/certs/private_key/private-key.pem"
+#      CERTIFICATE_PATH: "/app/certs/certificate/certificate.pem"
+#    volumes:
+#      - ./temp:/app/certs
+#    restart: unless-stopped

@@ -38,6 +38,11 @@ COUNTRY_CODE=LV
 # API configuration
 API_KEY=your-api-key
 SERVICE_URL=http://localhost:8080/
+
+# Service Mode (new in v1.x)
+SERVICE_MODE=internal  # "public" or "internal" (default: "internal")
+# - "public": Read-only endpoints (/get, /{country}/{doctype}/{id}), no Swagger
+# - "internal": Full API including /take, /set (API key protected), with Swagger
 ```
 
 ### Development Setup
@@ -226,6 +231,88 @@ docker run -d -p 8081:8080 \
 ```
 
 Both instances will read and write to the same S3 bucket, enabling horizontal scaling.
+
+## Service Mode: Public vs Internal
+
+The service supports two operational modes via the `SERVICE_MODE` environment variable, allowing you to run separate instances for public and internal use:
+
+### Public Mode (`SERVICE_MODE=public`)
+
+**Purpose:** Internet-facing, read-only access to status lists
+
+**Features:**
+- ✅ GET endpoints only (no write operations)
+- ✅ `/token_status_list/get` - Query status by URI and index
+- ✅ `/token_status_list/{country}/{doctype}/{id}` - Serve status list
+- ✅ `/health` - Health check endpoint
+- ❌ No Swagger UI (security)
+- ❌ No `/take` endpoint (no status list creation)
+- ❌ No `/set` endpoint (no status updates)
+
+**Use Case:** Load-balanced public instances for verifying credential status
+
+### Internal Mode (`SERVICE_MODE=internal`)
+
+**Purpose:** Protected API for credential issuers and administrative operations
+
+**Features:**
+- ✅ All GET endpoints (read operations)
+- ✅ POST `/token_status_list/take` - Create/allocate status list entries (API key required)
+- ✅ POST `/token_status_list/set` - Update status entries (API key required)
+- ✅ Swagger UI at `/token_status_list/swagger`
+- ✅ Full API documentation and testing interface
+
+**Use Case:** Single protected instance for credential issuance systems
+
+### Deployment Example: Public + Internal
+
+```bash
+# Internal instance (protected, single instance)
+docker run -d \
+  --name statuslist-internal \
+  -p 8080:8080 \
+  -e SERVICE_MODE=internal \
+  -e API_KEY=secret-api-key \
+  -e STATUS_LIST_STORAGE=s3 \
+  -e S3_BUCKET=status-lists \
+  statuslist-service
+
+# Public instances (scalable, no API key needed)
+docker run -d \
+  --name statuslist-public-1 \
+  -p 8081:8080 \
+  -e SERVICE_MODE=public \
+  -e STATUS_LIST_STORAGE=s3 \
+  -e S3_BUCKET=status-lists \
+  statuslist-service
+
+docker run -d \
+  --name statuslist-public-2 \
+  -p 8082:8080 \
+  -e SERVICE_MODE=public \
+  -e STATUS_LIST_STORAGE=s3 \
+  -e S3_BUCKET=status-lists \
+  statuslist-service
+```
+
+### Architecture Benefits
+
+1. **Security Isolation**: Write operations isolated from public internet
+2. **Independent Scaling**: Scale public read instances horizontally based on verification load
+3. **Simplified Access Control**: No API key management on public instances
+4. **Reduced Attack Surface**: Swagger and write endpoints not exposed publicly
+5. **Cost Optimization**: Minimal resources for internal instance, scale only public as needed
+
+### Network Configuration
+
+**Typical Setup:**
+```
+Internet → Load Balancer → Public Instances (SERVICE_MODE=public)
+                              ↓ (read from)
+                           S3 Bucket
+                              ↑ (write to)
+Internal Network → Internal Instance (SERVICE_MODE=internal)
+```
 
 ## Swagger
 
