@@ -29,6 +29,7 @@ type Config struct {
 	ServiceURL          string
 	SwaggerURLPrefix    string
 	BasePath            string // Base path for all routes (e.g., "/api")
+	ServiceMode         string // "public" or "internal" - controls which endpoints are registered
 	TokenStatusListSize int
 	StatusListDir       string
 	BackupDir           string
@@ -62,6 +63,7 @@ func Load() (*Config, error) {
 		ServiceURL:       getEnv("SERVICE_URL", "http://localhost:8080/"), // from this value, Status List URL is derived
 		SwaggerURLPrefix: getEnv("SWAGGER_URL_PREFIX", ""),                // Empty means use ServiceURL as base, e.g., "/api"
 		BasePath:         NormalizeBasePath(getEnv("BASE_PATH", "")),      // Base path for all routes (e.g., "/api")
+		ServiceMode:      getEnv("SERVICE_MODE", "internal"),              // "public" (read-only (GET methods), no Swagger) or "internal" (full API + Swagger)
 
 		// Maximum number of entries (tokens) that a single status list can hold before a new list needs to be created.
 		TokenStatusListSize: 10000,
@@ -96,6 +98,14 @@ func Load() (*Config, error) {
 		AllowedDoctypes: getAllowedDoctypes(),
 		CountryCode:     getEnv("COUNTRY_CODE", "LV"), // Default to Latvia (LV)
 	}
+
+	// Validate and normalize service mode
+	config.ServiceMode = strings.ToLower(strings.TrimSpace(config.ServiceMode))
+	if config.ServiceMode != "public" && config.ServiceMode != "internal" {
+		log.Printf("Invalid SERVICE_MODE '%s', defaulting to 'internal'", config.ServiceMode)
+		config.ServiceMode = "internal"
+	}
+	log.Printf("Service mode: %s", config.ServiceMode)
 
 	// Ensure directories exist
 	if err := ensureDir(config.StatusListDir); err != nil {

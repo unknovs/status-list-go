@@ -74,10 +74,22 @@ func Init(app *azugo.App, cfg *config.Config, handler *handlers.StatusListHandle
 		return path
 	}
 
+	// Determine service mode ("public" or "internal")
+	serviceMode := cfg.ServiceMode
+	if serviceMode == "" {
+		serviceMode = "internal" // Default to internal mode for backward compatibility
+	}
+	isPublicMode := serviceMode == "public"
+
 	// REST API routes
-	register(fasthttp.MethodPost, prefix("/token_status_list/take"), adapt(http.HandlerFunc(handler.TakeIndex)), true)
+	// Internal-only endpoints (require API key)
+	if !isPublicMode {
+		register(fasthttp.MethodPost, prefix("/token_status_list/take"), adapt(http.HandlerFunc(handler.TakeIndex)), true)
+		register(fasthttp.MethodPost, prefix("/token_status_list/set"), adapt(http.HandlerFunc(handler.SetIndex)), true)
+	}
+
+	// Public endpoints (no API key required)
 	register(fasthttp.MethodGet, prefix("/token_status_list/get"), adapt(http.HandlerFunc(handler.GetIndex)), true)
-	register(fasthttp.MethodPost, prefix("/token_status_list/set"), adapt(http.HandlerFunc(handler.SetIndex)), true)
 	register(fasthttp.MethodGet, prefix("/token_status_list/{country}/{doctype}/{id}"), adapt(http.HandlerFunc(handler.ServeStatusList)), true)
 
 	// Static assets
@@ -90,11 +102,13 @@ func Init(app *azugo.App, cfg *config.Config, handler *handlers.StatusListHandle
 		register(fasthttp.MethodGet, "/token_status_list/static/{path:*}", adapt(fallbackStaticHandler), false)
 	}
 
-	// Swagger assets
-	register(fasthttp.MethodGet, prefix("/token_status_list/swagger"), adapt(http.HandlerFunc(swaggerIndex)), true)
-	register(fasthttp.MethodGet, prefix("/token_status_list/swagger/swagger.json"), adapt(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		serveSwaggerJSON(w, r, cfg)
-	})), true)
+	// Swagger assets (internal mode only)
+	if !isPublicMode {
+		register(fasthttp.MethodGet, prefix("/token_status_list/swagger"), adapt(http.HandlerFunc(swaggerIndex)), true)
+		register(fasthttp.MethodGet, prefix("/token_status_list/swagger/swagger.json"), adapt(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			serveSwaggerJSON(w, r, cfg)
+		})), true)
+	}
 
 	// Health route using native Azugo handler to avoid adapter overhead.
 	healthHandler := func(ctx *azugo.Context) {
@@ -104,7 +118,7 @@ func Init(app *azugo.App, cfg *config.Config, handler *handlers.StatusListHandle
 	}
 	register(fasthttp.MethodGet, prefix("/health"), healthHandler, true)
 
-	// Root index mirrors old behaviour.
+	// Root index mirrors old behavior.
 	register(fasthttp.MethodGet, prefix("/"), func(ctx *azugo.Context) {
 		ctx.StatusCode(fasthttp.StatusOK)
 		ctx.Text("OK")
