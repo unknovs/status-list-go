@@ -260,7 +260,7 @@ func (rs *RenewalService) performWriteAttempt(path string, content []byte, attem
 		return writeAttemptResult{shouldReturn: true, err: err}
 	}
 
-	err = rs.attemptWrite(path, content, currentVersion, attempt)
+	err = rs.attemptWrite(path, content, currentVersion)
 	if err == nil {
 		if attempt > 1 {
 			log.Printf("Successfully wrote %s after %d attempts", path, attempt)
@@ -306,7 +306,7 @@ func (rs *RenewalService) getCurrentVersion(path string) (int, error) {
 }
 
 // attemptWrite performs a single write attempt
-func (rs *RenewalService) attemptWrite(path string, content []byte, currentVersion, attempt int) error {
+func (rs *RenewalService) attemptWrite(path string, content []byte, currentVersion int) error {
 	return rs.storage.Write(path, content, currentVersion+1)
 }
 
