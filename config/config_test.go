@@ -468,6 +468,7 @@ func TestLoad(t *testing.T) {
 		"API_KEY", "SERVICE_URL", "STATUS_LIST_DIR", "BACKUP_DIR", "LOG_DIR",
 		"PRIVATE_KEY_PATH", "CERTIFICATE_PATH", "COUNTRY_CODE", "ALLOWED_DOCTYPES",
 		"STATUS_LIST_CLEANUP_ENABLED", "STATUS_LIST_CLEANUP_HOUR", "STATUS_LIST_CLEANUP_MINUTE",
+		"STATUS_LIST_RENEWAL_ENABLED", "STATUS_LIST_RENEWAL_HOUR", "STATUS_LIST_RENEWAL_MINUTE",
 	}
 
 	for _, envVar := range envVars {
@@ -533,12 +534,24 @@ func TestLoad(t *testing.T) {
 			t.Error("Expected cleanup to be enabled by default")
 		}
 
-		if config.CleanupHour != 2 {
-			t.Errorf("Expected CleanupHour 2, got %d", config.CleanupHour)
+		if config.CleanupHour != 4 {
+			t.Errorf("Expected CleanupHour 4, got %d", config.CleanupHour)
 		}
 
 		if config.CleanupMinute != 0 {
 			t.Errorf("Expected CleanupMinute 0, got %d", config.CleanupMinute)
+		}
+
+		if !config.RenewalEnabled {
+			t.Error("Expected renewal to be enabled by default")
+		}
+
+		if config.RenewalHour != 12 {
+			t.Errorf("Expected RenewalHour 12, got %d", config.RenewalHour)
+		}
+
+		if config.RenewalMinute != 0 {
+			t.Errorf("Expected RenewalMinute 0, got %d", config.RenewalMinute)
 		}
 
 		// Test that default doctypes are loaded
@@ -586,6 +599,9 @@ func TestLoad(t *testing.T) {
 		os.Setenv("STATUS_LIST_CLEANUP_ENABLED", "false")
 		os.Setenv("STATUS_LIST_CLEANUP_HOUR", "5")
 		os.Setenv("STATUS_LIST_CLEANUP_MINUTE", "30")
+		os.Setenv("STATUS_LIST_RENEWAL_ENABLED", "false")
+		os.Setenv("STATUS_LIST_RENEWAL_HOUR", "14")
+		os.Setenv("STATUS_LIST_RENEWAL_MINUTE", "45")
 
 		config, err := Load()
 		if err != nil {
@@ -627,6 +643,18 @@ func TestLoad(t *testing.T) {
 
 		if config.CleanupMinute != 30 {
 			t.Errorf("Expected CleanupMinute 30, got %d", config.CleanupMinute)
+		}
+
+		if config.RenewalEnabled {
+			t.Error("Expected renewal to be disabled via env")
+		}
+
+		if config.RenewalHour != 14 {
+			t.Errorf("Expected RenewalHour 14, got %d", config.RenewalHour)
+		}
+
+		if config.RenewalMinute != 45 {
+			t.Errorf("Expected RenewalMinute 45, got %d", config.RenewalMinute)
 		}
 
 		// Test custom doctypes
@@ -682,6 +710,9 @@ func TestConfigStruct(t *testing.T) {
 		CleanupEnabled:      true,
 		CleanupHour:         3,
 		CleanupMinute:       45,
+		RenewalEnabled:      true,
+		RenewalHour:         14,
+		RenewalMinute:       30,
 	}
 
 	// Test all fields are set correctly

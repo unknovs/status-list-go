@@ -79,7 +79,7 @@ func Load() (*Config, error) {
 
 		// Expired status list cleanup service configuration
 		CleanupEnabled: getEnvBool("STATUS_LIST_CLEANUP_ENABLED", true),
-		CleanupHour:    normalizeHour(getEnvInt("STATUS_LIST_CLEANUP_HOUR", 3)),     // Default to 3 AM. Normalize to valid hour (value between 0-23)
+		CleanupHour:    normalizeHour(getEnvInt("STATUS_LIST_CLEANUP_HOUR", 4)),     // Default to 4 AM. Normalize to valid hour (value between 0-23)
 		CleanupMinute:  normalizeMinute(getEnvInt("STATUS_LIST_CLEANUP_MINUTE", 0)), // Default to 0 minutes. Normalize to valid minute (value between 0-59)
 
 		// Status list renewal service configuration
