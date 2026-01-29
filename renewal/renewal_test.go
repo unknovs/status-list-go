@@ -737,3 +737,380 @@ func TestRelativePathError(t *testing.T) {
 func SkipTestCopyFileStatError(t *testing.T) {
 	t.Skip("Tests related to removed copyFile functionality")
 }
+
+// MockStorage for testing version conflicts and retries
+type MockStorage struct {
+	storage.Storage
+	existsFunc      func(path string) (bool, error)
+	getVersionFunc  func(path string) (int, error)
+	writeFunc       func(path string, content []byte, version int) error
+	createFunc      func(path string, content []byte) error
+	readFunc        func(path string) ([]byte, error)
+	writeCalls      int
+	getVersionCalls int
+}
+
+func (m *MockStorage) Exists(path string) (bool, error) {
+	if m.existsFunc != nil {
+		return m.existsFunc(path)
+	}
+	return true, nil
+}
+
+func (m *MockStorage) GetVersion(path string) (int, error) {
+	m.getVersionCalls++
+	if m.getVersionFunc != nil {
+		return m.getVersionFunc(path)
+	}
+	return 1, nil
+}
+
+func (m *MockStorage) Write(path string, content []byte, version int) error {
+	m.writeCalls++
+	if m.writeFunc != nil {
+		return m.writeFunc(path, content, version)
+	}
+	return nil
+}
+
+func (m *MockStorage) Create(path string, content []byte) error {
+	if m.createFunc != nil {
+		return m.createFunc(path, content)
+	}
+	return nil
+}
+
+func (m *MockStorage) Read(path string) ([]byte, error) {
+	if m.readFunc != nil {
+		return m.readFunc(path)
+	}
+	return []byte("{}"), nil
+}
+
+// TestWriteOrCreateFile_NewFile tests creating a new file
+func TestWriteOrCreateFile_NewFile(t *testing.T) {
+	cfg := &config.Config{
+		StatusListDir: "/tmp/test",
+	}
+
+	mockStorage := &MockStorage{
+		existsFunc: func(path string) (bool, error) {
+			return false, nil
+		},
+		createFunc: func(path string, content []byte) error {
+			if string(content) != "test content" {
+				t.Errorf("Expected content 'test content', got '%s'", string(content))
+			}
+			return nil
+		},
+	}
+
+	rs := &RenewalService{
+		config:  cfg,
+		storage: mockStorage,
+	}
+
+	err := rs.writeOrCreateFile("test.txt", []byte("test content"))
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+
+	if mockStorage.writeCalls > 0 {
+		t.Error("Write should not be called for new file")
+	}
+}
+
+// TestWriteOrCreateFile_VersionConflictRetry tests retry logic on version mismatch
+func TestWriteOrCreateFile_VersionConflictRetry(t *testing.T) {
+	cfg := &config.Config{
+		StatusListDir: "/tmp/test",
+	}
+
+	attemptCount := 0
+	mockStorage := &MockStorage{
+		existsFunc: func(path string) (bool, error) {
+			return true, nil
+		},
+		getVersionFunc: func(path string) (int, error) {
+			// Return incrementing versions to simulate concurrent updates
+			attemptCount++
+			return attemptCount * 10, nil
+		},
+		writeFunc: func(path string, content []byte, version int) error {
+			// First two attempts fail with version mismatch
+			if attemptCount < 3 {
+				return &versionMismatchError{expected: version + 10, got: version}
+			}
+			return nil
+		},
+	}
+
+	rs := &RenewalService{
+		config:  cfg,
+		storage: mockStorage,
+	}
+
+	err := rs.writeOrCreateFile("test.txt", []byte("test content"))
+	if err != nil {
+		t.Errorf("Expected success after retries, got error: %v", err)
+	}
+
+	if mockStorage.writeCalls != 3 {
+		t.Errorf("Expected 3 write attempts, got %d", mockStorage.writeCalls)
+	}
+
+	if mockStorage.getVersionCalls != 3 {
+		t.Errorf("Expected 3 getVersion calls, got %d", mockStorage.getVersionCalls)
+	}
+}
+
+// versionMismatchError simulates version mismatch error
+type versionMismatchError struct {
+	expected int
+	got      int
+}
+
+func (e *versionMismatchError) Error() string {
+	return "version mismatch: expected " + string(rune(e.expected)) + ", got " + string(rune(e.got))
+}
+
+// TestWriteOrCreateFile_MaxRetriesExceeded tests failure after max retries
+func TestWriteOrCreateFile_MaxRetriesExceeded(t *testing.T) {
+	cfg := &config.Config{
+		StatusListDir: "/tmp/test",
+	}
+
+	mockStorage := &MockStorage{
+		existsFunc: func(path string) (bool, error) {
+			return true, nil
+		},
+		getVersionFunc: func(path string) (int, error) {
+			return 1, nil
+		},
+		writeFunc: func(path string, content []byte, version int) error {
+			// Always fail with version mismatch
+			return &versionMismatchError{expected: 100, got: version}
+		},
+	}
+
+	rs := &RenewalService{
+		config:  cfg,
+		storage: mockStorage,
+	}
+
+	err := rs.writeOrCreateFile("test.txt", []byte("test content"))
+	if err == nil {
+		t.Error("Expected error after max retries, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "failed after 3 attempts") {
+		t.Errorf("Expected 'failed after 3 attempts' error, got: %v", err)
+	}
+
+	if mockStorage.writeCalls != 3 {
+		t.Errorf("Expected 3 write attempts, got %d", mockStorage.writeCalls)
+	}
+}
+
+// TestWriteOrCreateFile_FileDeletedDuringOperation tests graceful handling when file is deleted
+func TestWriteOrCreateFile_FileDeletedDuringOperation(t *testing.T) {
+	cfg := &config.Config{
+		StatusListDir: "/tmp/test",
+	}
+
+	existsCalls := 0
+	mockStorage := &MockStorage{
+		existsFunc: func(path string) (bool, error) {
+			existsCalls++
+			// File exists on first check, deleted on second check
+			return existsCalls == 1, nil
+		},
+		getVersionFunc: func(path string) (int, error) {
+			return 1, nil
+		},
+	}
+
+	rs := &RenewalService{
+		config:  cfg,
+		storage: mockStorage,
+	}
+
+	err := rs.writeOrCreateFile("test.txt", []byte("test content"))
+	if err != nil {
+		t.Errorf("Expected no error when file is deleted, got: %v", err)
+	}
+
+	if mockStorage.writeCalls > 0 {
+		t.Error("Write should not be called when file no longer exists")
+	}
+}
+
+// TestWriteOrCreateFile_GetVersionFailsWithNoSuchKey tests handling of file deletion during GetVersion
+func TestWriteOrCreateFile_GetVersionFailsWithNoSuchKey(t *testing.T) {
+	cfg := &config.Config{
+		StatusListDir: "/tmp/test",
+	}
+
+	mockStorage := &MockStorage{
+		existsFunc: func(path string) (bool, error) {
+			return true, nil
+		},
+		getVersionFunc: func(path string) (int, error) {
+			return 0, &noSuchKeyError{}
+		},
+	}
+
+	rs := &RenewalService{
+		config:  cfg,
+		storage: mockStorage,
+	}
+
+	err := rs.writeOrCreateFile("test.txt", []byte("test content"))
+	if err != nil {
+		t.Errorf("Expected no error when file is deleted during GetVersion, got: %v", err)
+	}
+
+	if mockStorage.writeCalls > 0 {
+		t.Error("Write should not be called when file is deleted")
+	}
+}
+
+// noSuchKeyError simulates S3 NoSuchKey error
+type noSuchKeyError struct{}
+
+func (e *noSuchKeyError) Error() string {
+	return "NoSuchKey: The specified key does not exist"
+}
+
+// TestWriteOrCreateFile_NonVersionMismatchError tests that other errors are not retried
+func TestWriteOrCreateFile_NonVersionMismatchError(t *testing.T) {
+	cfg := &config.Config{
+		StatusListDir: "/tmp/test",
+	}
+
+	mockStorage := &MockStorage{
+		existsFunc: func(path string) (bool, error) {
+			return true, nil
+		},
+		getVersionFunc: func(path string) (int, error) {
+			return 1, nil
+		},
+		writeFunc: func(path string, content []byte, version int) error {
+			return &otherError{msg: "permission denied"}
+		},
+	}
+
+	rs := &RenewalService{
+		config:  cfg,
+		storage: mockStorage,
+	}
+
+	err := rs.writeOrCreateFile("test.txt", []byte("test content"))
+	if err == nil {
+		t.Error("Expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("Expected 'permission denied' error, got: %v", err)
+	}
+
+	if mockStorage.writeCalls != 1 {
+		t.Errorf("Expected only 1 write attempt (no retry), got %d", mockStorage.writeCalls)
+	}
+}
+
+// otherError simulates non-version-mismatch error
+type otherError struct {
+	msg string
+}
+
+func (e *otherError) Error() string {
+	return e.msg
+}
+
+// TestProcessListFile_FileNotFound tests graceful handling of missing files
+func TestProcessListFile_FileNotFound(t *testing.T) {
+	cfg := &config.Config{
+		StatusListDir: "/tmp/test",
+	}
+
+	mockStorage := &MockStorage{
+		readFunc: func(path string) ([]byte, error) {
+			return nil, &noSuchKeyError{}
+		},
+	}
+
+	rs := &RenewalService{
+		config:  cfg,
+		storage: mockStorage,
+	}
+
+	formatter := &services.StatusListFormatter{}
+
+	err := rs.processListFile("test/full_list.json", formatter)
+	if err != nil {
+		t.Errorf("Expected no error for missing file, got: %v", err)
+	}
+}
+
+// TestRenewTokenStatusList_DirectoryDeletedDuringWrite tests graceful handling when directory is deleted
+func TestRenewTokenStatusList_DirectoryDeletedDuringWrite(t *testing.T) {
+	tempDir, _, cfg, stor := setupTestEnvironment(t)
+	defer os.RemoveAll(tempDir)
+
+	// Create mock storage that simulates directory deletion
+	mockStorage := &MockStorage{
+		Storage: stor,
+		existsFunc: func(path string) (bool, error) {
+			return true, nil
+		},
+		getVersionFunc: func(path string) (int, error) {
+			return 0, &noSuchKeyError{}
+		},
+	}
+
+	rs := &RenewalService{
+		config:  cfg,
+		storage: mockStorage,
+	}
+
+	statusListData := createTestStatusListData(false)
+	formatter := services.NewStatusListFormatter(cfg)
+
+	// Should not return error even though directory was deleted
+	err := rs.renewTokenStatusList("token_status_list/test", statusListData, formatter)
+	if err != nil {
+		t.Errorf("Expected no error when directory is deleted, got: %v", err)
+	}
+}
+
+// TestRenewIdentifierList_DirectoryDeletedDuringWrite tests graceful handling when directory is deleted
+func TestRenewIdentifierList_DirectoryDeletedDuringWrite(t *testing.T) {
+	tempDir, _, cfg, stor := setupTestEnvironment(t)
+	defer os.RemoveAll(tempDir)
+
+	// Create mock storage that simulates directory deletion
+	mockStorage := &MockStorage{
+		Storage: stor,
+		existsFunc: func(path string) (bool, error) {
+			return true, nil
+		},
+		getVersionFunc: func(path string) (int, error) {
+			return 0, &noSuchKeyError{}
+		},
+	}
+
+	rs := &RenewalService{
+		config:  cfg,
+		storage: mockStorage,
+	}
+
+	statusListData := createTestStatusListData(false)
+	formatter := services.NewStatusListFormatter(cfg)
+
+	// Should not return error even though directory was deleted
+	err := rs.renewIdentifierList("identifier_list/test", statusListData, formatter)
+	if err != nil {
+		t.Errorf("Expected no error when directory is deleted, got: %v", err)
+	}
+}

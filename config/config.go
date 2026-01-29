@@ -37,6 +37,9 @@ type Config struct {
 	CleanupEnabled      bool
 	CleanupHour         int
 	CleanupMinute       int
+	RenewalEnabled      bool
+	RenewalHour         int
+	RenewalMinute       int
 
 	// Simple certificate configuration
 	PrivKeyPath string
@@ -76,8 +79,13 @@ func Load() (*Config, error) {
 
 		// Expired status list cleanup service configuration
 		CleanupEnabled: getEnvBool("STATUS_LIST_CLEANUP_ENABLED", true),
-		CleanupHour:    normalizeHour(getEnvInt("STATUS_LIST_CLEANUP_HOUR", 2)),     // Default to 2 AM. Normalize to valid hour (value between 0-23)
+		CleanupHour:    normalizeHour(getEnvInt("STATUS_LIST_CLEANUP_HOUR", 3)),     // Default to 3 AM. Normalize to valid hour (value between 0-23)
 		CleanupMinute:  normalizeMinute(getEnvInt("STATUS_LIST_CLEANUP_MINUTE", 0)), // Default to 0 minutes. Normalize to valid minute (value between 0-59)
+
+		// Status list renewal service configuration
+		RenewalEnabled: getEnvBool("STATUS_LIST_RENEWAL_ENABLED", true),
+		RenewalHour:    normalizeHour(getEnvInt("STATUS_LIST_RENEWAL_HOUR", 12)),    // Default to 12 PM (noon). Normalize to valid hour (value between 0-23)
+		RenewalMinute:  normalizeMinute(getEnvInt("STATUS_LIST_RENEWAL_MINUTE", 0)), // Default to 0 minutes. Normalize to valid minute (value between 0-59)
 
 		// Certificate configuration from environment or Docker secrets
 		// PrivKeyPath: getEnv("PRIVATE_KEY_PATH", "/run/secrets/private_key"),

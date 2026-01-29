@@ -31,6 +31,11 @@ import (
 	"github.com/unknovs/status-list-go/services/storage"
 )
 
+const (
+	errNotFound  = "not found"
+	errNoSuchKey = "NoSuchKey"
+)
+
 // RenewalService handles the renewal of status lists
 type RenewalService struct {
 	config  *config.Config
@@ -99,6 +104,11 @@ func (rs *RenewalService) processListFile(filePath string, formatter *services.S
 	// Read and parse the list file using Storage interface
 	jsonData, err := rs.storage.Read(relativePath)
 	if err != nil {
+		// File might have been deleted by cleanup service, skip gracefully
+		if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
+			log.Printf("File %s no longer exists (may have been cleaned up), skipping", filePath)
+			return nil
+		}
 		log.Printf("Error reading file %s: %v", filePath, err)
 		return nil // Continue with other files
 	}
@@ -153,7 +163,12 @@ func (rs *RenewalService) renewTokenStatusList(dirPath string, statusListData *m
 	} else {
 		jwtPath := filepath.Join(dirPath, "token_status_list.jwt")
 		if err := rs.writeOrCreateFile(jwtPath, []byte(jwtContent)); err != nil {
-			log.Printf("Failed to write JWT file %s: %v", jwtPath, err)
+			// Check if directory was deleted (cleanup service removed expired list)
+			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
+				log.Printf("Directory %s no longer exists (cleaned up), skipping JWT write", dirPath)
+			} else {
+				log.Printf("Failed to write JWT file %s: %v", jwtPath, err)
+			}
 		}
 	}
 
@@ -164,7 +179,12 @@ func (rs *RenewalService) renewTokenStatusList(dirPath string, statusListData *m
 	} else {
 		cwtPath := filepath.Join(dirPath, "token_status_list.cwt")
 		if err := rs.writeOrCreateFile(cwtPath, []byte(cwtContent)); err != nil {
-			log.Printf("Failed to write CWT file %s: %v", cwtPath, err)
+			// Check if directory was deleted (cleanup service removed expired list)
+			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
+				log.Printf("Directory %s no longer exists (cleaned up), skipping CWT write", dirPath)
+			} else {
+				log.Printf("Failed to write CWT file %s: %v", cwtPath, err)
+			}
 		}
 	}
 
@@ -183,7 +203,12 @@ func (rs *RenewalService) renewIdentifierList(dirPath string, statusListData *mo
 	} else {
 		jwtPath := filepath.Join(dirPath, "identifier_list.jwt")
 		if err := rs.writeOrCreateFile(jwtPath, []byte(jwtContent)); err != nil {
-			log.Printf("Failed to write identifier JWT file %s: %v", jwtPath, err)
+			// Check if directory was deleted (cleanup service removed expired list)
+			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
+				log.Printf("Directory %s no longer exists (cleaned up), skipping identifier JWT write", dirPath)
+			} else {
+				log.Printf("Failed to write identifier JWT file %s: %v", jwtPath, err)
+			}
 		}
 	}
 
@@ -194,7 +219,12 @@ func (rs *RenewalService) renewIdentifierList(dirPath string, statusListData *mo
 	} else {
 		cwtPath := filepath.Join(dirPath, "identifier_list.cwt")
 		if err := rs.writeOrCreateFile(cwtPath, []byte(cwtContent)); err != nil {
-			log.Printf("Failed to write identifier CWT file %s: %v", cwtPath, err)
+			// Check if directory was deleted (cleanup service removed expired list)
+			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
+				log.Printf("Directory %s no longer exists (cleaned up), skipping identifier CWT write", dirPath)
+			} else {
+				log.Printf("Failed to write identifier CWT file %s: %v", cwtPath, err)
+			}
 		}
 	}
 
@@ -202,47 +232,81 @@ func (rs *RenewalService) renewIdentifierList(dirPath string, statusListData *mo
 }
 
 // writeOrCreateFile is a helper that creates a file if it doesn't exist, or writes to it if it does
+// It implements retry logic for version conflicts (optimistic locking failures)
 func (rs *RenewalService) writeOrCreateFile(path string, content []byte) error {
 	exists, err := rs.storage.Exists(path)
 	if err != nil {
 		return err
 	}
 
-	if exists {
-		// Get current version and increment it
-		currentVersion, err := rs.storage.GetVersion(path)
-		if err != nil {
-			return fmt.Errorf("failed to get current version: %w", err)
-		}
-		return rs.storage.Write(path, content, currentVersion+1)
+	if !exists {
+		return rs.storage.Create(path, content)
 	}
 
-	return rs.storage.Create(path, content)
+	// Retry up to 3 times on version mismatch
+	maxRetries := 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Verify file still exists before attempting write (might have been deleted by cleanup)
+		exists, err := rs.storage.Exists(path)
+		if err != nil {
+			return fmt.Errorf("failed to check file existence: %w", err)
+		}
+		if !exists {
+			log.Printf("File %s no longer exists (may have been cleaned up), skipping write", path)
+			return nil // Gracefully skip - file was deleted
+		}
+
+		// Read the latest version immediately before writing
+		currentVersion, err := rs.storage.GetVersion(path)
+		if err != nil {
+			// File might have been deleted between Exists() and GetVersion()
+			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
+				log.Printf("File %s was deleted during operation, skipping write", path)
+				return nil
+			}
+			return fmt.Errorf("failed to get current version: %w", err)
+		}
+
+		// Attempt write with incremented version
+		err = rs.storage.Write(path, content, currentVersion+1)
+		if err == nil {
+			// Success
+			if attempt > 1 {
+				log.Printf("Successfully wrote %s after %d attempts", path, attempt)
+			}
+			return nil
+		}
+
+		// Check if it's a version mismatch error
+		if strings.Contains(err.Error(), "version mismatch") {
+			if attempt < maxRetries {
+				log.Printf("Version conflict on %s (attempt %d/%d), retrying...", path, attempt, maxRetries)
+				time.Sleep(time.Millisecond * 100 * time.Duration(attempt)) // Exponential backoff
+				continue
+			}
+			return fmt.Errorf("failed after %d attempts: %w", maxRetries, err)
+		}
+
+		// Other error, don't retry
+		return err
+	}
+
+	return fmt.Errorf("failed to write after %d retries", maxRetries)
 }
 
 // copyFile is no longer used with storage abstraction
 // Backups should be handled at the infrastructure level
 
-// dailyRenewal runs the renewal process daily at midnight
+// dailyRenewal runs the renewal process daily at the configured time
 func (rs *RenewalService) dailyRenewal() {
 	for {
 		now := time.Now()
+		next := nextRun(now, rs.config.RenewalHour, rs.config.RenewalMinute)
+		delay := time.Until(next)
 
-		var nextExecution time.Time
-		if now.Hour() < 12 {
-			nextExecution = now.Truncate(time.Hour * 24).Add(12 * time.Hour)
-		} else {
-			nextExecution = now.Truncate(time.Hour * 24).Add(24 * time.Hour)
-		}
+		log.Printf("Next status list renewal scheduled in %02dh:%02dm:%02ds", int(delay.Hours()), int(delay.Minutes())%60, int(delay.Seconds())%60)
 
-		duration := nextExecution.Sub(now)
-		hours := int(duration.Hours())
-		minutes := int(duration.Minutes()) % 60
-		seconds := int(duration.Seconds()) % 60
-
-		log.Printf("Renewing in %02d:%02d:%02d", hours, minutes, seconds)
-
-		time.Sleep(duration)
+		time.Sleep(delay)
 
 		log.Println("Renewing Revocation Lists")
 
@@ -252,8 +316,26 @@ func (rs *RenewalService) dailyRenewal() {
 	}
 }
 
+// nextRun calculates the next execution time based on configured hour and minute
+func nextRun(now time.Time, hour, minute int) time.Time {
+	// Create time for today at the configured hour:minute
+	today := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
+
+	// If the time has already passed today, schedule for tomorrow
+	if now.After(today) || now.Equal(today) {
+		return today.Add(24 * time.Hour)
+	}
+
+	return today
+}
+
 // StartRenewalThread starts the renewal thread as a global function
 func StartRenewalThread(cfg *config.Config, stor storage.Storage) {
+	if !cfg.RenewalEnabled {
+		log.Println("Status list renewal disabled via configuration")
+		return
+	}
+
 	go func() {
 		renewalService := NewRenewalService(cfg, stor)
 		renewalService.dailyRenewal()
