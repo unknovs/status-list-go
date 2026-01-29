@@ -227,39 +227,53 @@ func (rs *RenewalService) writeOrCreateFile(path string, content []byte) error {
 // writeWithRetry attempts to write with version control, retrying on conflicts
 func (rs *RenewalService) writeWithRetry(path string, content []byte, maxRetries int) error {
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		exists, err := rs.verifyFileExists(path)
-		if err != nil {
-			return err
+		result := rs.performWriteAttempt(path, content, attempt, maxRetries)
+		if result.shouldReturn {
+			return result.err
 		}
-		if !exists {
-			return nil // File was deleted, skip gracefully
-		}
-
-		currentVersion, err := rs.getCurrentVersion(path)
-		if err != nil {
-			if stdErrors.Is(err, errors.ErrNotFound) {
-				return nil // File was deleted, skip gracefully
-			}
-			return err
-		}
-
-		err = rs.attemptWrite(path, content, currentVersion, attempt)
-		if err == nil {
-			// Success
-			if attempt > 1 {
-				log.Printf("Successfully wrote %s after %d attempts", path, attempt)
-			}
-			return nil
-		}
-
-		// Handle error - either retry or return fatal error
-		if shouldRetry, retryErr := rs.handleWriteError(err, path, attempt, maxRetries); !shouldRetry {
-			return retryErr
-		}
-		// Continue to next attempt
 	}
 
 	return fmt.Errorf("failed to write after %d retries", maxRetries)
+}
+
+// writeAttemptResult contains the result of a single write attempt
+type writeAttemptResult struct {
+	shouldReturn bool  // true if the caller should return immediately
+	err          error // error to return (nil on success)
+}
+
+// performWriteAttempt performs a single write attempt and returns whether to continue
+func (rs *RenewalService) performWriteAttempt(path string, content []byte, attempt, maxRetries int) writeAttemptResult {
+	exists, err := rs.verifyFileExists(path)
+	if err != nil {
+		return writeAttemptResult{shouldReturn: true, err: err}
+	}
+	if !exists {
+		return writeAttemptResult{shouldReturn: true, err: nil}
+	}
+
+	currentVersion, err := rs.getCurrentVersion(path)
+	if err != nil {
+		if stdErrors.Is(err, errors.ErrNotFound) {
+			return writeAttemptResult{shouldReturn: true, err: nil}
+		}
+		return writeAttemptResult{shouldReturn: true, err: err}
+	}
+
+	err = rs.attemptWrite(path, content, currentVersion, attempt)
+	if err == nil {
+		if attempt > 1 {
+			log.Printf("Successfully wrote %s after %d attempts", path, attempt)
+		}
+		return writeAttemptResult{shouldReturn: true, err: nil}
+	}
+
+	shouldRetry, retryErr := rs.handleWriteError(err, path, attempt, maxRetries)
+	if !shouldRetry {
+		return writeAttemptResult{shouldReturn: true, err: retryErr}
+	}
+
+	return writeAttemptResult{shouldReturn: false, err: nil}
 }
 
 // verifyFileExists checks if file still exists before write attempt
