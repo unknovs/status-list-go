@@ -220,32 +220,30 @@ func (rs *RenewalService) writeOrCreateFile(path string, content []byte) error {
 		return rs.storage.Create(path, content)
 	}
 
-	// Retry up to 3 times on version mismatch
-	maxRetries := 3
+	// File exists, attempt write with retry logic
+	return rs.writeWithRetry(path, content, 3)
+}
+
+// writeWithRetry attempts to write with version control, retrying on conflicts
+func (rs *RenewalService) writeWithRetry(path string, content []byte, maxRetries int) error {
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// Verify file still exists before attempting write (might have been deleted by cleanup)
-		exists, err := rs.storage.Exists(path)
+		exists, err := rs.verifyFileExists(path)
 		if err != nil {
-			return fmt.Errorf("failed to check file existence: %w", err)
+			return err
 		}
 		if !exists {
-			log.Printf("File %s no longer exists (may have been cleaned up), skipping write", path)
-			return nil // Gracefully skip - file was deleted
+			return nil // File was deleted, skip gracefully
 		}
 
-		// Read the latest version immediately before writing
-		currentVersion, err := rs.storage.GetVersion(path)
+		currentVersion, err := rs.getCurrentVersion(path)
 		if err != nil {
-			// File might have been deleted between Exists() and GetVersion()
 			if stdErrors.Is(err, errors.ErrNotFound) {
-				log.Printf("File %s was deleted during operation, skipping write", path)
-				return nil
+				return nil // File was deleted, skip gracefully
 			}
-			return fmt.Errorf("failed to get current version: %w", err)
+			return err
 		}
 
-		// Attempt write with incremented version
-		err = rs.storage.Write(path, content, currentVersion+1)
+		err = rs.attemptWrite(path, content, currentVersion, attempt)
 		if err == nil {
 			// Success
 			if attempt > 1 {
@@ -254,21 +252,64 @@ func (rs *RenewalService) writeOrCreateFile(path string, content []byte) error {
 			return nil
 		}
 
-		// Check if it's a version mismatch error
-		if stdErrors.Is(err, errors.ErrVersionMismatch) {
-			if attempt < maxRetries {
-				log.Printf("Version conflict on %s (attempt %d/%d), retrying...", path, attempt, maxRetries)
-				time.Sleep(time.Millisecond * 100 * time.Duration(attempt)) // Exponential backoff
-				continue
-			}
-			return fmt.Errorf("failed after %d attempts: %w", maxRetries, err)
+		// Handle error - either retry or return fatal error
+		if shouldRetry, retryErr := rs.handleWriteError(err, path, attempt, maxRetries); !shouldRetry {
+			return retryErr
 		}
-
-		// Other error, don't retry
-		return err
+		// Continue to next attempt
 	}
 
 	return fmt.Errorf("failed to write after %d retries", maxRetries)
+}
+
+// verifyFileExists checks if file still exists before write attempt
+func (rs *RenewalService) verifyFileExists(path string) (bool, error) {
+	exists, err := rs.storage.Exists(path)
+	if err != nil {
+		return false, fmt.Errorf("failed to check file existence: %w", err)
+	}
+
+	if !exists {
+		log.Printf("File %s no longer exists (may have been cleaned up), skipping write", path)
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// getCurrentVersion retrieves the current file version
+// Returns (0, nil) if file was deleted - caller should handle gracefully
+func (rs *RenewalService) getCurrentVersion(path string) (int, error) {
+	currentVersion, err := rs.storage.GetVersion(path)
+	if err != nil {
+		if stdErrors.Is(err, errors.ErrNotFound) {
+			log.Printf("File %s was deleted during operation, skipping write", path)
+			return 0, errors.ErrNotFound
+		}
+		return 0, fmt.Errorf("failed to get current version: %w", err)
+	}
+	return currentVersion, nil
+}
+
+// attemptWrite performs a single write attempt
+func (rs *RenewalService) attemptWrite(path string, content []byte, currentVersion, attempt int) error {
+	return rs.storage.Write(path, content, currentVersion+1)
+}
+
+// handleWriteError determines if write should retry or fail
+// Returns (shouldRetry, error) - if shouldRetry is false, the error should be returned to caller
+func (rs *RenewalService) handleWriteError(err error, path string, attempt, maxRetries int) (bool, error) {
+	if !stdErrors.Is(err, errors.ErrVersionMismatch) {
+		return false, err
+	}
+
+	if attempt >= maxRetries {
+		return false, fmt.Errorf("failed after %d attempts: %w", maxRetries, err)
+	}
+
+	log.Printf("Version conflict on %s (attempt %d/%d), retrying...", path, attempt, maxRetries)
+	time.Sleep(time.Millisecond * 100 * time.Duration(attempt)) // Exponential backoff
+	return true, nil                                            // Signal to continue retrying
 }
 
 // copyFile is no longer used with storage abstraction
