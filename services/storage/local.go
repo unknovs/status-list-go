@@ -1,12 +1,14 @@
 package storage
 
 import (
-	"errors"
+	stdErrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/unknovs/status-list-go/errors"
 )
 
 const (
@@ -21,7 +23,7 @@ type LocalStorage struct {
 // NewLocalStorage creates a new local filesystem storage backend.
 func NewLocalStorage(statusListDir string) (*LocalStorage, error) {
 	if statusListDir == "" {
-		return nil, errors.New("STATUS_LIST_DIR is required for local storage")
+		return nil, stdErrors.New("STATUS_LIST_DIR is required for local storage")
 	}
 
 	return &LocalStorage{
@@ -37,7 +39,7 @@ func (ls *LocalStorage) Create(path string, content []byte) error {
 
 	// Check if file already exists
 	if _, err := os.Stat(fullPath); err == nil {
-		return fmt.Errorf("file already exists: %s", path)
+		return fmt.Errorf("%w: %s", errors.ErrAlreadyExists, path)
 	}
 
 	// Ensure directory exists
@@ -66,7 +68,7 @@ func (ls *LocalStorage) Read(path string) ([]byte, error) {
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("file not found: %s", path)
+			return nil, fmt.Errorf("%w: %s", errors.ErrNotFound, path)
 		}
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
@@ -93,7 +95,7 @@ func (ls *LocalStorage) Write(path string, content []byte, version int) error {
 
 	// Validate version (optimistic locking)
 	if version != currentVersion+1 {
-		return fmt.Errorf("version mismatch: expected %d, got %d", currentVersion+1, version)
+		return fmt.Errorf("%w: expected %d, got %d", errors.ErrVersionMismatch, currentVersion+1, version)
 	}
 
 	// Ensure directory exists

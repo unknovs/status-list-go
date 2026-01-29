@@ -19,6 +19,7 @@ package renewal
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	"github.com/unknovs/status-list-go/config"
+	"github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/models"
 	"github.com/unknovs/status-list-go/services"
 	"github.com/unknovs/status-list-go/services/storage"
@@ -871,7 +873,11 @@ type versionMismatchError struct {
 }
 
 func (e *versionMismatchError) Error() string {
-	return "version mismatch: expected " + string(rune(e.expected)) + ", got " + string(rune(e.got))
+	return fmt.Errorf("%w: expected %d, got %d", errors.ErrVersionMismatch, e.expected, e.got).Error()
+}
+
+func (e *versionMismatchError) Unwrap() error {
+	return errors.ErrVersionMismatch
 }
 
 // TestWriteOrCreateFile_MaxRetriesExceeded tests failure after max retries
@@ -979,7 +985,11 @@ func TestWriteOrCreateFile_GetVersionFailsWithNoSuchKey(t *testing.T) {
 type noSuchKeyError struct{}
 
 func (e *noSuchKeyError) Error() string {
-	return "NoSuchKey: The specified key does not exist"
+	return fmt.Errorf("%w: The specified key does not exist", errors.ErrNotFound).Error()
+}
+
+func (e *noSuchKeyError) Unwrap() error {
+	return errors.ErrNotFound
 }
 
 // TestWriteOrCreateFile_NonVersionMismatchError tests that other errors are not retried

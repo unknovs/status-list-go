@@ -18,6 +18,7 @@ package renewal
 
 import (
 	"encoding/json"
+	stdErrors "errors"
 	"fmt"
 	"log"
 	"os"
@@ -26,14 +27,10 @@ import (
 	"time"
 
 	"github.com/unknovs/status-list-go/config"
+	"github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/models"
 	"github.com/unknovs/status-list-go/services"
 	"github.com/unknovs/status-list-go/services/storage"
-)
-
-const (
-	errNotFound  = "not found"
-	errNoSuchKey = "NoSuchKey"
 )
 
 // RenewalService handles the renewal of status lists
@@ -57,7 +54,7 @@ func (rs *RenewalService) RenewLists() error {
 	// Check if the status list directory exists
 	if _, err := os.Stat(rs.config.StatusListDir); os.IsNotExist(err) {
 		log.Printf("Error listing files: status list directory does not exist: %s", rs.config.StatusListDir)
-		return fmt.Errorf("status list directory does not exist: %s", rs.config.StatusListDir)
+		return fmt.Errorf("status list directory does not exist: %s: %w", rs.config.StatusListDir, err)
 	}
 
 	// Create formatter for JWT/CWT generation
@@ -105,7 +102,7 @@ func (rs *RenewalService) processListFile(filePath string, formatter *services.S
 	jsonData, err := rs.storage.Read(relativePath)
 	if err != nil {
 		// File might have been deleted by cleanup service, skip gracefully
-		if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
+		if stdErrors.Is(err, errors.ErrNotFound) {
 			log.Printf("File %s no longer exists (may have been cleaned up), skipping", filePath)
 			return nil
 		}
@@ -164,7 +161,7 @@ func (rs *RenewalService) renewTokenStatusList(dirPath string, statusListData *m
 		jwtPath := filepath.Join(dirPath, "token_status_list.jwt")
 		if err := rs.writeOrCreateFile(jwtPath, []byte(jwtContent)); err != nil {
 			// Check if directory was deleted (cleanup service removed expired list)
-			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
+			if stdErrors.Is(err, errors.ErrNotFound) {
 				log.Printf("Directory %s no longer exists (cleaned up), skipping JWT write", dirPath)
 			} else {
 				log.Printf("Failed to write JWT file %s: %v", jwtPath, err)
@@ -180,7 +177,7 @@ func (rs *RenewalService) renewTokenStatusList(dirPath string, statusListData *m
 		cwtPath := filepath.Join(dirPath, "token_status_list.cwt")
 		if err := rs.writeOrCreateFile(cwtPath, []byte(cwtContent)); err != nil {
 			// Check if directory was deleted (cleanup service removed expired list)
-			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
+			if stdErrors.Is(err, errors.ErrNotFound) {
 				log.Printf("Directory %s no longer exists (cleaned up), skipping CWT write", dirPath)
 			} else {
 				log.Printf("Failed to write CWT file %s: %v", cwtPath, err)
@@ -204,7 +201,7 @@ func (rs *RenewalService) renewIdentifierList(dirPath string, statusListData *mo
 		jwtPath := filepath.Join(dirPath, "identifier_list.jwt")
 		if err := rs.writeOrCreateFile(jwtPath, []byte(jwtContent)); err != nil {
 			// Check if directory was deleted (cleanup service removed expired list)
-			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
+			if stdErrors.Is(err, errors.ErrNotFound) {
 				log.Printf("Directory %s no longer exists (cleaned up), skipping identifier JWT write", dirPath)
 			} else {
 				log.Printf("Failed to write identifier JWT file %s: %v", jwtPath, err)
@@ -220,7 +217,7 @@ func (rs *RenewalService) renewIdentifierList(dirPath string, statusListData *mo
 		cwtPath := filepath.Join(dirPath, "identifier_list.cwt")
 		if err := rs.writeOrCreateFile(cwtPath, []byte(cwtContent)); err != nil {
 			// Check if directory was deleted (cleanup service removed expired list)
-			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
+			if stdErrors.Is(err, errors.ErrNotFound) {
 				log.Printf("Directory %s no longer exists (cleaned up), skipping identifier CWT write", dirPath)
 			} else {
 				log.Printf("Failed to write identifier CWT file %s: %v", cwtPath, err)
@@ -260,7 +257,7 @@ func (rs *RenewalService) writeOrCreateFile(path string, content []byte) error {
 		currentVersion, err := rs.storage.GetVersion(path)
 		if err != nil {
 			// File might have been deleted between Exists() and GetVersion()
-			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
+			if stdErrors.Is(err, errors.ErrNotFound) {
 				log.Printf("File %s was deleted during operation, skipping write", path)
 				return nil
 			}
@@ -278,7 +275,7 @@ func (rs *RenewalService) writeOrCreateFile(path string, content []byte) error {
 		}
 
 		// Check if it's a version mismatch error
-		if strings.Contains(err.Error(), "version mismatch") {
+		if stdErrors.Is(err, errors.ErrVersionMismatch) {
 			if attempt < maxRetries {
 				log.Printf("Version conflict on %s (attempt %d/%d), retrying...", path, attempt, maxRetries)
 				time.Sleep(time.Millisecond * 100 * time.Duration(attempt)) // Exponential backoff
