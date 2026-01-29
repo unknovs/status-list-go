@@ -83,69 +83,101 @@ func (rs *RenewalService) RenewLists() error {
 
 // processListFile processes a single list file
 func (rs *RenewalService) processListFile(filePath string, formatter *services.StatusListFormatter) error {
-	// Convert absolute path to relative path if needed
-	var relativePath string
-	if filepath.IsAbs(filePath) {
-		if rel, err := filepath.Rel(rs.config.StatusListDir, filePath); err == nil {
-			relativePath = rel
-		} else {
-			// If we can't make it relative, use the original path and let storage handle it
-			relativePath = filePath
-		}
-	} else {
-		relativePath = filePath
-	}
-
+	relativePath := rs.convertToRelativePath(filePath)
 	dirPath := filepath.Dir(relativePath)
 
-	// Read and parse the list file using Storage interface
+	statusListData, shouldSkip := rs.loadAndValidateData(relativePath, filePath, dirPath)
+	if shouldSkip {
+		return nil
+	}
+
+	// Determine list type and regenerate files
+	if strings.Contains(dirPath, "token_status_list") {
+		return rs.renewTokenStatusList(dirPath, statusListData, formatter)
+	} else if strings.Contains(dirPath, "identifier_list") {
+		return rs.renewIdentifierList(dirPath, statusListData, formatter)
+	}
+
+	return nil
+}
+
+// convertToRelativePath converts an absolute path to relative path if needed
+func (rs *RenewalService) convertToRelativePath(filePath string) string {
+	if !filepath.IsAbs(filePath) {
+		return filePath
+	}
+
+	if rel, err := filepath.Rel(rs.config.StatusListDir, filePath); err == nil {
+		return rel
+	}
+
+	// If we can't make it relative, use the original path and let storage handle it
+	return filePath
+}
+
+// loadAndValidateData reads and validates the status list data
+func (rs *RenewalService) loadAndValidateData(relativePath, filePath, dirPath string) (*models.StatusListData, bool) {
 	jsonData, err := rs.storage.Read(relativePath)
 	if err != nil {
-		// File might have been deleted by cleanup service, skip gracefully
-		if stdErrors.Is(err, errors.ErrNotFound) {
-			log.Printf("File %s no longer exists (may have been cleaned up), skipping", filePath)
-			return nil
-		}
-		log.Printf("Error reading file %s: %v", filePath, err)
-		return nil // Continue with other files
+		return nil, rs.handleReadError(err, filePath)
 	}
 
 	var statusListData models.StatusListData
 	if err := json.Unmarshal(jsonData, &statusListData); err != nil {
 		log.Printf("Error unmarshaling file %s: %v", filePath, err)
-		return nil // Continue with other files
+		return nil, true
 	}
 
-	// Check if required URIs exist
+	if !rs.hasRequiredURIs(&statusListData, filePath) {
+		return nil, true
+	}
+
+	if rs.isListExpired(&statusListData, dirPath) {
+		return nil, true
+	}
+
+	return &statusListData, false
+}
+
+// handleReadError handles storage read errors and returns whether to skip
+func (rs *RenewalService) handleReadError(err error, filePath string) bool {
+	if stdErrors.Is(err, errors.ErrNotFound) {
+		log.Printf("File %s no longer exists (may have been cleaned up), skipping", filePath)
+		return true
+	}
+	log.Printf("Error reading file %s: %v", filePath, err)
+	return true
+}
+
+// hasRequiredURIs checks if the status list has required URIs
+func (rs *RenewalService) hasRequiredURIs(statusListData *models.StatusListData, filePath string) bool {
 	if statusListData.StatusListURI == "" || statusListData.IdentifierListURI == "" {
 		log.Printf("URIs don't exist in file: %s", filePath)
-		return nil // Continue with other files
+		return false
+	}
+	return true
+}
+
+// isListExpired checks if the status list has expired
+func (rs *RenewalService) isListExpired(statusListData *models.StatusListData, dirPath string) bool {
+	if statusListData.Expires == nil {
+		return false
 	}
 
-	// Check if expired
-	if statusListData.Expires != nil {
-		expiresDate, err := time.Parse("2006-01-02", *statusListData.Expires)
-		if err != nil {
-			log.Printf("Error parsing expiry date in file %s: %v", filePath, err)
-			return nil // Continue with other files
-		}
-
-		if expiresDate.Before(time.Now()) {
-			log.Printf("List %s is expired, skipping renewal", dirPath)
-			// Note: Expired lists are cleaned up by the separate cleanup service
-			// which runs on a configurable schedule (default: daily at 2:00 AM)
-			return nil
-		}
+	expiresDate, err := time.Parse("2006-01-02", *statusListData.Expires)
+	if err != nil {
+		log.Printf("Error parsing expiry date in file %s: %v", dirPath, err)
+		return true
 	}
 
-	// Determine list type and regenerate files
-	if strings.Contains(dirPath, "token_status_list") {
-		return rs.renewTokenStatusList(dirPath, &statusListData, formatter)
-	} else if strings.Contains(dirPath, "identifier_list") {
-		return rs.renewIdentifierList(dirPath, &statusListData, formatter)
+	if expiresDate.Before(time.Now()) {
+		log.Printf("List %s is expired, skipping renewal", dirPath)
+		// Note: Expired lists are cleaned up by the separate cleanup service
+		// which runs on a configurable schedule (default: daily at 2:00 AM)
+		return true
 	}
 
-	return nil
+	return false
 }
 
 // renewTokenStatusList renews token status list files

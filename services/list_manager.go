@@ -87,64 +87,87 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 	statusListCopy.Country = country
 	statusListCopy.Doctype = doctype
 
-	// Save full list JSON
 	jsonData, err := json.Marshal(statusListCopy)
 	if err != nil {
 		return err
 	}
 
-	// Define file paths
+	// Save JSON files
+	if err := lm.saveJSONFiles(country, doctype, rand, jsonData); err != nil {
+		return err
+	}
+
+	// Generate URIs
+	statusListURI, identifierListURI := lm.buildURIs(country, doctype, rand)
+
+	// Generate and save all format files
+	if err := lm.saveFormatFiles(statusListData, country, doctype, rand, statusListURI, identifierListURI); err != nil {
+		return err
+	}
+
+	// Update URIs in the status list data
+	statusListData.StatusListURI = statusListURI
+	statusListData.IdentifierListURI = identifierListURI
+
+	return nil
+}
+
+// saveJSONFiles saves both token and identifier JSON files
+func (lm *ListManager) saveJSONFiles(country, doctype, rand string, jsonData []byte) error {
 	tokenJSONPath := filepath.Join("token_status_list", country, doctype, rand, FullListJSONFile)
+	if err := lm.saveJSONFile(tokenJSONPath, jsonData, "token"); err != nil {
+		return err
+	}
+
 	identifierJSONPath := filepath.Join("identifier_list", country, doctype, rand, FullListJSONFile)
+	return lm.saveJSONFile(identifierJSONPath, jsonData, "identifier")
+}
 
-	// Use storage interface to write files
-	// Check if files exist, create or write accordingly
-	tokenExists, err := lm.storage.Exists(tokenJSONPath)
+// saveJSONFile saves a single JSON file, creating or updating as needed
+func (lm *ListManager) saveJSONFile(path string, jsonData []byte, fileType string) error {
+	exists, err := lm.storage.Exists(path)
 	if err != nil {
-		return fmt.Errorf("failed to check token file existence: %w", err)
+		return fmt.Errorf("failed to check %s file existence: %w", fileType, err)
 	}
 
-	if tokenExists {
-		// Get current version and increment it
-		currentVersion, err := lm.storage.GetVersion(tokenJSONPath)
+	if exists {
+		currentVersion, err := lm.storage.GetVersion(path)
 		if err != nil {
-			return fmt.Errorf("failed to get token file version: %w", err)
+			return fmt.Errorf("failed to get %s file version: %w", fileType, err)
 		}
-		if err := lm.storage.Write(tokenJSONPath, jsonData, currentVersion+1); err != nil {
-			return fmt.Errorf("failed to update token JSON: %w", err)
+		if err := lm.storage.Write(path, jsonData, currentVersion+1); err != nil {
+			return fmt.Errorf("failed to update %s JSON: %w", fileType, err)
 		}
 	} else {
-		// File doesn't exist, use Create
-		if err := lm.storage.Create(tokenJSONPath, jsonData); err != nil {
-			return fmt.Errorf("failed to create token JSON: %w", err)
+		if err := lm.storage.Create(path, jsonData); err != nil {
+			return fmt.Errorf("failed to create %s JSON: %w", fileType, err)
 		}
 	}
 
-	// Save identifier list JSON
-	identifierExists, err := lm.storage.Exists(identifierJSONPath)
-	if err != nil {
-		return fmt.Errorf("failed to check identifier file existence: %w", err)
-	}
+	return nil
+}
 
-	if identifierExists {
-		currentVersion, err := lm.storage.GetVersion(identifierJSONPath)
-		if err != nil {
-			return fmt.Errorf("failed to get identifier file version: %w", err)
-		}
-		if err := lm.storage.Write(identifierJSONPath, jsonData, currentVersion+1); err != nil {
-			return fmt.Errorf("failed to update identifier JSON: %w", err)
-		}
-	} else {
-		if err := lm.storage.Create(identifierJSONPath, jsonData); err != nil {
-			return fmt.Errorf("failed to create identifier JSON: %w", err)
-		}
-	}
-
-	// Generate JWT and CWT files
+// buildURIs constructs the status list and identifier list URIs
+func (lm *ListManager) buildURIs(country, doctype, rand string) (string, string) {
 	statusListURI := lm.config.ServiceURL + fmt.Sprintf("token_status_list/%s/%s/%s", country, doctype, rand)
 	identifierListURI := lm.config.ServiceURL + fmt.Sprintf("identifier_list/%s/%s/%s", country, doctype, rand)
+	return statusListURI, identifierListURI
+}
 
-	// Generate and save token status list JWT
+// saveFormatFiles generates and saves all JWT and CWT format files
+func (lm *ListManager) saveFormatFiles(statusListData *models.StatusListData, country, doctype, rand, statusListURI, identifierListURI string) error {
+	// Token status list formats
+	if err := lm.saveTokenStatusListFormats(statusListData, country, doctype, rand, statusListURI); err != nil {
+		return err
+	}
+
+	// Identifier list formats
+	return lm.saveIdentifierListFormats(statusListData, country, doctype, rand, identifierListURI)
+}
+
+// saveTokenStatusListFormats generates and saves JWT and CWT for token status list
+func (lm *ListManager) saveTokenStatusListFormats(statusListData *models.StatusListData, country, doctype, rand, statusListURI string) error {
+	// Generate and save JWT
 	jwtContent, err := lm.generateJWTFormat(statusListData.TokenStatusList, country, statusListURI)
 	if err != nil {
 		log.Printf("Failed to generate JWT: %v", err)
@@ -155,7 +178,7 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 		}
 	}
 
-	// Generate and save token status list CWT
+	// Generate and save CWT
 	cwtContent, err := lm.generateCWTFormat(statusListData.TokenStatusList, country, statusListURI)
 	if err != nil {
 		log.Printf("Failed to generate CWT: %v", err)
@@ -166,7 +189,12 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 		}
 	}
 
-	// Generate and save identifier list JWT
+	return nil
+}
+
+// saveIdentifierListFormats generates and saves JWT and CWT for identifier list
+func (lm *ListManager) saveIdentifierListFormats(statusListData *models.StatusListData, country, doctype, rand, identifierListURI string) error {
+	// Generate and save identifier JWT
 	identifierJWTContent, err := lm.generateIdentifierJWTFormat(statusListData.IdentifierList, country, identifierListURI)
 	if err != nil {
 		log.Printf("Failed to generate identifier JWT: %v", err)
@@ -177,7 +205,7 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 		}
 	}
 
-	// Generate and save identifier list CWT
+	// Generate and save identifier CWT
 	identifierCWTContent, err := lm.generateIdentifierCWTFormat(statusListData.IdentifierList, country, identifierListURI)
 	if err != nil {
 		log.Printf("Failed to generate identifier CWT: %v", err)
@@ -187,10 +215,6 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 			return fmt.Errorf("failed to save identifier CWT: %w", err)
 		}
 	}
-
-	// Update URIs in the status list data
-	statusListData.StatusListURI = statusListURI
-	statusListData.IdentifierListURI = identifierListURI
 
 	return nil
 }

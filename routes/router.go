@@ -19,19 +19,35 @@ import (
 
 // Init wires all HTTP routes into the provided Azugo application instance.
 func Init(app *azugo.App, cfg *config.Config, handler *handlers.StatusListHandler) error {
-	adapt := func(h http.Handler) azugo.RequestHandler {
-		adapter := fasthttpadaptor.NewFastHTTPHandler(h)
-		return func(ctx *azugo.Context) {
-			adapter(ctx.Context())
-		}
-	}
-
 	basePath := config.NormalizeBasePath(cfg.BasePath)
 	if cfg.BasePath != basePath {
 		cfg.BasePath = basePath
 	}
 
-	register := func(method, path string, h azugo.RequestHandler, includeFallback bool) {
+	isPublicMode := determineServiceMode(cfg)
+	register := createRegisterFunc(app, basePath)
+	prefix := createPrefixFunc(basePath)
+
+	registerAPIRoutes(register, prefix, handler, isPublicMode)
+	registerStaticRoutes(register, prefix, basePath)
+	registerSwaggerRoutes(register, prefix, cfg, isPublicMode)
+	registerUtilityRoutes(register, prefix)
+
+	return nil
+}
+
+// determineServiceMode returns true if the service is in public mode
+func determineServiceMode(cfg *config.Config) bool {
+	serviceMode := cfg.ServiceMode
+	if serviceMode == "" {
+		serviceMode = "internal" // Default to internal mode for backward compatibility
+	}
+	return serviceMode == "public"
+}
+
+// createRegisterFunc creates the route registration function with fallback support
+func createRegisterFunc(app *azugo.App, basePath string) func(method, path string, h azugo.RequestHandler, includeFallback bool) {
+	return func(method, path string, h azugo.RequestHandler, includeFallback bool) {
 		add := func(route string) {
 			switch method {
 			case fasthttp.MethodGet:
@@ -66,23 +82,32 @@ func Init(app *azugo.App, cfg *config.Config, handler *handlers.StatusListHandle
 
 		add(trimmed)
 	}
+}
 
-	// Helper function to add base path prefix
-	prefix := func(path string) string {
+// createPrefixFunc creates the path prefix function
+func createPrefixFunc(basePath string) func(path string) string {
+	return func(path string) string {
 		if basePath != "" && !strings.HasPrefix(path, basePath) {
 			return basePath + path
 		}
 		return path
 	}
+}
 
-	// Determine service mode ("public" or "internal")
-	serviceMode := cfg.ServiceMode
-	if serviceMode == "" {
-		serviceMode = "internal" // Default to internal mode for backward compatibility
+// registerAPIRoutes registers the main API endpoints
+func registerAPIRoutes(
+	register func(method, path string, h azugo.RequestHandler, includeFallback bool),
+	prefix func(path string) string,
+	handler *handlers.StatusListHandler,
+	isPublicMode bool,
+) {
+	adapt := func(h http.Handler) azugo.RequestHandler {
+		adapter := fasthttpadaptor.NewFastHTTPHandler(h)
+		return func(ctx *azugo.Context) {
+			adapter(ctx.Context())
+		}
 	}
-	isPublicMode := serviceMode == "public"
 
-	// REST API routes
 	// Internal-only endpoints (require API key)
 	if !isPublicMode {
 		register(fasthttp.MethodPost, prefix("/token_status_list/take"), adapt(http.HandlerFunc(handler.TakeIndex)), true)
@@ -92,26 +117,61 @@ func Init(app *azugo.App, cfg *config.Config, handler *handlers.StatusListHandle
 	// Public endpoints (no API key required)
 	register(fasthttp.MethodGet, prefix("/token_status_list/get"), adapt(http.HandlerFunc(handler.GetIndex)), true)
 	register(fasthttp.MethodGet, prefix("/token_status_list/{country}/{doctype}/{id}"), adapt(http.HandlerFunc(handler.ServeStatusList)), true)
+}
 
-	// Static assets
+// registerStaticRoutes registers static file serving routes
+func registerStaticRoutes(
+	register func(method, path string, h azugo.RequestHandler, includeFallback bool),
+	prefix func(path string) string,
+	basePath string,
+) {
+	adapt := func(h http.Handler) azugo.RequestHandler {
+		adapter := fasthttpadaptor.NewFastHTTPHandler(h)
+		return func(ctx *azugo.Context) {
+			adapter(ctx.Context())
+		}
+	}
+
 	staticDir := http.Dir(resolveStaticDir())
 	staticBasePrefix := prefix("/token_status_list/static/")
 	staticHandler := http.StripPrefix(staticBasePrefix, http.FileServer(staticDir))
 	register(fasthttp.MethodGet, prefix("/token_status_list/static/{path:*}"), adapt(staticHandler), false)
+
 	if basePath != "" {
 		fallbackStaticHandler := http.StripPrefix("/token_status_list/static/", http.FileServer(staticDir))
 		register(fasthttp.MethodGet, "/token_status_list/static/{path:*}", adapt(fallbackStaticHandler), false)
 	}
+}
 
-	// Swagger assets (internal mode only)
-	if !isPublicMode {
-		register(fasthttp.MethodGet, prefix("/token_status_list/swagger"), adapt(http.HandlerFunc(swaggerIndex)), true)
-		register(fasthttp.MethodGet, prefix("/token_status_list/swagger/swagger.json"), adapt(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			serveSwaggerJSON(w, r, cfg)
-		})), true)
+// registerSwaggerRoutes registers Swagger documentation routes (internal mode only)
+func registerSwaggerRoutes(
+	register func(method, path string, h azugo.RequestHandler, includeFallback bool),
+	prefix func(path string) string,
+	cfg *config.Config,
+	isPublicMode bool,
+) {
+	if isPublicMode {
+		return
 	}
 
-	// Health route using native Azugo handler to avoid adapter overhead.
+	adapt := func(h http.Handler) azugo.RequestHandler {
+		adapter := fasthttpadaptor.NewFastHTTPHandler(h)
+		return func(ctx *azugo.Context) {
+			adapter(ctx.Context())
+		}
+	}
+
+	register(fasthttp.MethodGet, prefix("/token_status_list/swagger"), adapt(http.HandlerFunc(swaggerIndex)), true)
+	register(fasthttp.MethodGet, prefix("/token_status_list/swagger/swagger.json"), adapt(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveSwaggerJSON(w, r, cfg)
+	})), true)
+}
+
+// registerUtilityRoutes registers health and root routes
+func registerUtilityRoutes(
+	register func(method, path string, h azugo.RequestHandler, includeFallback bool),
+	prefix func(path string) string,
+) {
 	healthHandler := func(ctx *azugo.Context) {
 		ctx.SkipRequestLog()
 		ctx.StatusCode(fasthttp.StatusOK)
@@ -124,8 +184,6 @@ func Init(app *azugo.App, cfg *config.Config, handler *handlers.StatusListHandle
 		ctx.StatusCode(fasthttp.StatusOK)
 		ctx.Text("OK")
 	}, true)
-
-	return nil
 }
 
 func resolveStaticDir() string {
