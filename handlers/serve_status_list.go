@@ -17,10 +17,13 @@ limitations under the License.
 package handlers
 
 import (
+	stdErrors "errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
+
+	"github.com/unknovs/status-list-go/errors"
 )
 
 const (
@@ -31,31 +34,31 @@ const (
 func (h *StatusListHandler) ServeStatusList(w http.ResponseWriter, r *http.Request) {
 	// Only allow GET method
 	if r.Method != http.MethodGet {
-		WriteError(w, http.StatusMethodNotAllowed, ErrBadRequest)
+		errors.WriteError(w, http.StatusMethodNotAllowed, errors.ErrBadRequest)
 		return
 	}
 
 	// Normalize path by stripping configured base path when present.
 	path, ok := normalizeStatusListPath(r.URL.Path, h.config.BasePath)
 	if !ok {
-		WriteError(w, http.StatusBadRequest, ErrInvalidPath)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidPath)
 		return
 	}
 
 	parts := strings.Split(path, "/")
 	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
-		WriteError(w, http.StatusBadRequest, ErrInvalidPath)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidPath)
 		return
 	}
 	country, doctype, rand := parts[0], parts[1], parts[2]
 
 	// Validate country and doctype using existing validation
 	if !h.config.ValidateCountry(country) {
-		WriteError(w, http.StatusBadRequest, ErrInvalidCountry)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidCountry)
 		return
 	}
 	if !h.config.ValidateDoctype(doctype) {
-		WriteError(w, http.StatusBadRequest, ErrInvalidDoctype)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidDoctype)
 		return
 	}
 
@@ -74,7 +77,7 @@ func (h *StatusListHandler) ServeStatusList(w http.ResponseWriter, r *http.Reque
 		contentType = "application/statuslist+cwt"
 		fileName = "token_status_list.cwt"
 	default:
-		WriteError(w, http.StatusNotAcceptable, ErrInvalidAccept)
+		errors.WriteError(w, http.StatusNotAcceptable, errors.ErrInvalidAccept)
 		return
 	}
 
@@ -87,10 +90,10 @@ func (h *StatusListHandler) ServeStatusList(w http.ResponseWriter, r *http.Reque
 	data, err := h.listManager.GetStorage().Read(statusListPath)
 	if err != nil {
 		// Check if it's a not found error
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "does not exist") {
-			WriteError(w, http.StatusNotFound, ErrListNotFound)
+		if stdErrors.Is(err, errors.ErrNotFound) {
+			errors.WriteError(w, http.StatusNotFound, errors.ErrListNotFound)
 		} else {
-			WriteError(w, http.StatusInternalServerError, ErrInternalServer)
+			errors.WriteError(w, http.StatusInternalServerError, errors.ErrInternalServer)
 		}
 		return
 	}

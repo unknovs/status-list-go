@@ -223,7 +223,7 @@ func TestS3StorageRead(t *testing.T) {
 	testData := map[string][]byte{
 		"file1.json": []byte(`{"key": "value1"}`),
 		"file2.txt":  []byte("plain text content"),
-		"empty.dat":  []byte{},
+		"empty.dat":  {},
 	}
 
 	for path, content := range testData {

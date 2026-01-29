@@ -35,7 +35,7 @@ func TestPerformHealthCheck(t *testing.T) {
 	originalServiceURL := os.Getenv("SERVICE_URL")
 	defer func() {
 		if originalServiceURL != "" {
-			os.Setenv("SERVICE_URL", originalServiceURL)
+			t.Setenv("SERVICE_URL", originalServiceURL)
 		} else {
 			os.Unsetenv("SERVICE_URL")
 		}
@@ -54,7 +54,7 @@ func TestPerformHealthCheck(t *testing.T) {
 		defer server.Close()
 
 		// Set the SERVICE_URL to our test server
-		os.Setenv("SERVICE_URL", server.URL)
+		t.Setenv("SERVICE_URL", server.URL)
 
 		// Since performHealthCheck calls os.Exit, we need to test it in a subprocess
 		if os.Getenv("TEST_HEALTH_CHECK") == "1" {
@@ -98,7 +98,7 @@ func TestPerformHealthCheck(t *testing.T) {
 
 		// Since performHealthCheck calls os.Exit, we need to test it in a subprocess
 		if os.Getenv("TEST_HEALTH_CHECK_CUSTOM") == "1" {
-			os.Setenv("SERVICE_URL", server.URL)
+			t.Setenv("SERVICE_URL", server.URL)
 			performHealthCheck()
 			return
 		}
@@ -135,7 +135,7 @@ func TestPerformHealthCheck(t *testing.T) {
 
 		// Since performHealthCheck calls os.Exit, we need to test it in a subprocess
 		if os.Getenv("TEST_HEALTH_CHECK_HTTP_ERROR") == "1" {
-			os.Setenv("SERVICE_URL", server.URL)
+			t.Setenv("SERVICE_URL", server.URL)
 			performHealthCheck()
 			return
 		}
@@ -170,7 +170,7 @@ func TestPerformHealthCheck(t *testing.T) {
 
 		// Since performHealthCheck calls os.Exit, we need to test it in a subprocess
 		if os.Getenv("TEST_HEALTH_CHECK_CONNECTION_ERROR") == "1" {
-			os.Setenv("SERVICE_URL", invalidURL)
+			t.Setenv("SERVICE_URL", invalidURL)
 			performHealthCheck()
 			return
 		}
@@ -217,7 +217,7 @@ func TestPerformHealthCheck(t *testing.T) {
 		// Since performHealthCheck calls os.Exit, we need to test it in a subprocess
 		if os.Getenv("TEST_HEALTH_CHECK_DEFAULT") == "1" {
 			// For testing, we'll use our test server URL instead of the default
-			os.Setenv("SERVICE_URL", server.URL)
+			t.Setenv("SERVICE_URL", server.URL)
 			performHealthCheck()
 			return
 		}
@@ -262,7 +262,7 @@ func TestMain_HealthCheckFlag(t *testing.T) {
 		if os.Getenv("TEST_MAIN_HEALTH_CHECK") == "1" {
 			// Override command line arguments
 			os.Args = []string{"status-list-go", "--health-check"}
-			os.Setenv("SERVICE_URL", server.URL)
+			t.Setenv("SERVICE_URL", server.URL)
 			main()
 			return
 		}
@@ -305,13 +305,13 @@ func TestMain_NormalExecution(t *testing.T) {
 		// we'll test in a subprocess with a timeout
 		if os.Getenv("TEST_MAIN_NORMAL") == "1" {
 			// Set environment variables for a valid config
-			os.Setenv("STATUS_LIST_DIR", tempDir+"/status_lists")
-			os.Setenv("BACKUP_DIR", tempDir+"/backup")
-			os.Setenv("LOG_DIR", tempDir+"/logs")
-			os.Setenv("API_KEY", "test_key")
-			os.Setenv("PRIVATE_KEY_PATH", "temp/private_key/decrypted_key.pem")
-			os.Setenv("CERTIFICATE_PATH", "temp/certificate/PID-DS-0002.cert.der")
-			os.Setenv("PORT", "8081")
+			t.Setenv("STATUS_LIST_DIR", tempDir+"/status_lists")
+			t.Setenv("BACKUP_DIR", tempDir+"/backup")
+			t.Setenv("LOG_DIR", tempDir+"/logs")
+			t.Setenv("API_KEY", "test_key")
+			t.Setenv("PRIVATE_KEY_PATH", "temp/private_key/decrypted_key.pem")
+			t.Setenv("CERTIFICATE_PATH", "temp/certificate/PID-DS-0002.cert.der")
+			t.Setenv("PORT", "8081")
 
 			// Override command line arguments (no health-check flag)
 			os.Args = []string{"status-list-go"}
@@ -369,7 +369,7 @@ func TestMain_ConfigLoadFailure(t *testing.T) {
 		// Since main() calls log.Fatalf on config load failure, test in subprocess
 		if os.Getenv("TEST_MAIN_CONFIG_FAIL") == "1" {
 			// Set an invalid directory that should cause config.Load() to fail
-			os.Setenv("STATUS_LIST_DIR", invalidPath)
+			t.Setenv("STATUS_LIST_DIR", invalidPath)
 			os.Args = []string{"status-list-go"}
 			main()
 			return
@@ -424,7 +424,7 @@ func TestPerformHealthCheck_HTTPClientTimeout(t *testing.T) {
 
 		// Since performHealthCheck calls os.Exit, we need to test it in a subprocess
 		if os.Getenv("TEST_HEALTH_CHECK_TIMEOUT") == "1" {
-			os.Setenv("SERVICE_URL", server.URL)
+			t.Setenv("SERVICE_URL", server.URL)
 			performHealthCheck()
 			return
 		}
@@ -480,7 +480,7 @@ func TestLocalStorageIntegration(t *testing.T) {
 	defer func() {
 		for key, value := range originalEnvVars {
 			if value != "" {
-				os.Setenv(key, value)
+				t.Setenv(key, value)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -491,14 +491,14 @@ func TestLocalStorageIntegration(t *testing.T) {
 	statusListDir := tempDir + "/status_lists"
 	backupDir := tempDir + "/backup"
 
-	os.Setenv("STATUS_LIST_DIR", statusListDir)
-	os.Setenv("BACKUP_DIR", backupDir)
+	t.Setenv("STATUS_LIST_DIR", statusListDir)
+	t.Setenv("BACKUP_DIR", backupDir)
 	os.Unsetenv("STATUS_LIST_STORAGE") // Should default to local
-	os.Setenv("SERVICE_URL", "http://localhost:8081/")
-	os.Setenv("API_KEY", "test_api_key")
-	os.Setenv("PRIVATE_KEY_PATH", "temp/private_key/decrypted_key.pem")
-	os.Setenv("CERTIFICATE_PATH", "temp/certificate/PID-DS-0002.cert.der")
-	os.Setenv("TOKEN_STATUS_LIST_SIZE", "100")
+	t.Setenv("SERVICE_URL", "http://localhost:8081/")
+	t.Setenv("API_KEY", "test_api_key")
+	t.Setenv("PRIVATE_KEY_PATH", "temp/private_key/decrypted_key.pem")
+	t.Setenv("CERTIFICATE_PATH", "temp/certificate/PID-DS-0002.cert.der")
+	t.Setenv("TOKEN_STATUS_LIST_SIZE", "100")
 
 	// Create the directories
 	if err := os.MkdirAll(statusListDir, 0755); err != nil {
@@ -870,7 +870,7 @@ func TestS3StorageIntegration(t *testing.T) {
 		// Restore original environment variables
 		for key, value := range originalEnvVars {
 			if value != "" {
-				os.Setenv(key, value)
+				t.Setenv(key, value)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -878,12 +878,12 @@ func TestS3StorageIntegration(t *testing.T) {
 	}()
 
 	// Configure S3 storage
-	os.Setenv("STATUS_LIST_STORAGE", "s3")
-	os.Setenv("S3_BUCKET", s3Bucket)
-	os.Setenv("S3_ENDPOINT", s3Endpoint)
-	os.Setenv("S3_ACCESS_KEY_ID", s3AccessKey)
-	os.Setenv("S3_SECRET_ACCESS_KEY", s3SecretKey)
-	os.Setenv("S3_REGION", "us-east-1")
+	t.Setenv("STATUS_LIST_STORAGE", "s3")
+	t.Setenv("S3_BUCKET", s3Bucket)
+	t.Setenv("S3_ENDPOINT", s3Endpoint)
+	t.Setenv("S3_ACCESS_KEY_ID", s3AccessKey)
+	t.Setenv("S3_SECRET_ACCESS_KEY", s3SecretKey)
+	t.Setenv("S3_REGION", "us-east-1")
 
 	t.Run("create status list with S3 storage", func(t *testing.T) {
 		// This test verifies that the application can create status lists using S3
@@ -979,7 +979,7 @@ func TestS3ConfigurationValidation(t *testing.T) {
 				// Restore original environment
 				for key, value := range originalEnv {
 					if value != "" {
-						os.Setenv(key, value)
+						t.Setenv(key, value)
 					} else {
 						os.Unsetenv(key)
 					}
@@ -991,7 +991,7 @@ func TestS3ConfigurationValidation(t *testing.T) {
 				os.Unsetenv(key)
 			}
 			for key, value := range tt.envVars {
-				os.Setenv(key, value)
+				t.Setenv(key, value)
 			}
 
 			// This test validates configuration parsing

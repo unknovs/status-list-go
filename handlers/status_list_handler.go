@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/unknovs/status-list-go/config"
+	"github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/services"
 	"github.com/unknovs/status-list-go/services/storage"
 )
@@ -66,13 +67,13 @@ func NewStatusListHandler(cfg *config.Config, stor storage.Storage) *StatusListH
 // @Router /token_status_list/take [post]
 func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		WriteError(w, http.StatusMethodNotAllowed, ErrBadRequest)
+		errors.WriteError(w, http.StatusMethodNotAllowed, errors.ErrBadRequest)
 		return
 	}
 
 	// Parse form data
 	if err := r.ParseForm(); err != nil {
-		WriteError(w, http.StatusBadRequest, ErrParseForm)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrParseForm)
 		return
 	}
 
@@ -80,7 +81,7 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 	apiKey := r.Header.Get(APIKeyHeader)
 	if apiKey != h.config.APIKey {
 		log.Printf("Authentication failed: incorrect API key provided")
-		WriteError(w, http.StatusUnauthorized, ErrInvalidAPIKey)
+		errors.WriteError(w, http.StatusUnauthorized, errors.ErrInvalidAPIKey)
 		return
 	}
 
@@ -88,7 +89,7 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 	doctype := r.FormValue("doctype")
 	if !h.config.ValidateDoctype(doctype) {
 		log.Printf("Invalid document type provided")
-		WriteError(w, http.StatusBadRequest, ErrInvalidDoctype)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidDoctype)
 		return
 	}
 
@@ -96,7 +97,7 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 	country := r.FormValue("country")
 	if !h.config.ValidateCountry(country) {
 		log.Printf("Invalid country provided")
-		WriteError(w, http.StatusBadRequest, ErrInvalidCountry)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidCountry)
 		return
 	}
 
@@ -104,7 +105,7 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 	expiryDate := r.FormValue("expiry_date")
 	if err := h.validateExpiryDate(expiryDate); err != nil {
 		log.Printf("Invalid expiry date provided, error: %v", err)
-		WriteError(w, http.StatusBadRequest, ErrInvalidExpiryDate)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidExpiryDate)
 		return
 	}
 
@@ -112,7 +113,7 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 	statusInfo, err := h.listManager.GenerateStatusListInfo(country, doctype, expiryDate)
 	if err != nil {
 		log.Printf("Failed to generate status info: %v", err)
-		WriteError(w, http.StatusInternalServerError, ErrInternalServer)
+		errors.WriteError(w, http.StatusInternalServerError, errors.ErrInternalServer)
 		return
 	}
 
@@ -134,7 +135,7 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 // @Router /token_status_list/get [get]
 func (h *StatusListHandler) GetIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		WriteError(w, http.StatusMethodNotAllowed, ErrBadRequest)
+		errors.WriteError(w, http.StatusMethodNotAllowed, errors.ErrBadRequest)
 		return
 	}
 
@@ -150,20 +151,20 @@ func (h *StatusListHandler) GetIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if uri == "" || idx == "" {
-		WriteError(w, http.StatusBadRequest, ErrBadRequest)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrBadRequest)
 		return
 	}
 
 	index, err := strconv.Atoi(idx)
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, ErrInvalidIndex)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidIndex)
 		return
 	}
 
 	// Decode URI
 	decodedURI, err := url.QueryUnescape(uri)
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, ErrInvalidURI)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidURI)
 		return
 	}
 
@@ -171,7 +172,7 @@ func (h *StatusListHandler) GetIndex(w http.ResponseWriter, r *http.Request) {
 	status, err := h.listManager.GetStatusFromURI(decodedURI, index)
 	if err != nil {
 		log.Printf("Failed to get status: %v", err)
-		WriteError(w, http.StatusBadRequest, ErrListNotFound)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrListNotFound)
 		return
 	}
 
@@ -196,20 +197,20 @@ func (h *StatusListHandler) GetIndex(w http.ResponseWriter, r *http.Request) {
 // @Router /token_status_list/set [post]
 func (h *StatusListHandler) SetIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		WriteError(w, http.StatusMethodNotAllowed, ErrBadRequest)
+		errors.WriteError(w, http.StatusMethodNotAllowed, errors.ErrBadRequest)
 		return
 	}
 
 	// Parse form data
 	if err := r.ParseForm(); err != nil {
-		WriteError(w, http.StatusBadRequest, ErrParseForm)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrParseForm)
 		return
 	}
 
 	// Validate API key
 	apiKey := r.Header.Get(APIKeyHeader)
 	if apiKey != h.config.APIKey {
-		WriteError(w, http.StatusUnauthorized, ErrUnauthorizedAccess)
+		errors.WriteError(w, http.StatusUnauthorized, errors.ErrUnauthorizedAccess)
 		return
 	}
 
@@ -224,45 +225,45 @@ func (h *StatusListHandler) SetIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if uri == "" || idx == "" || statusStr == "" {
-		WriteError(w, http.StatusBadRequest, ErrBadRequest)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrBadRequest)
 		return
 	}
 
 	index, err := strconv.Atoi(idx)
 	if err != nil {
 		log.Printf("Invalid index: %v", err)
-		WriteError(w, http.StatusBadRequest, ErrInvalidIndex)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidIndex)
 		return
 	}
 
 	status, err := strconv.Atoi(statusStr)
 	if err != nil {
 		log.Printf("Invalid status: %v", err)
-		WriteError(w, http.StatusBadRequest, ErrInvalidStatus)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidStatus)
 		return
 	}
 
 	if status != 1 {
-		WriteError(w, http.StatusBadRequest, ErrInvalidStatus)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidStatus)
 		return
 	}
 
 	// Parse URI to extract country, doctype, and id
 	parsedURL, err := url.Parse(uri)
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, ErrInvalidURI)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidURI)
 		return
 	}
 
 	normalizedPath, ok := normalizeStatusListPath(parsedURL.Path, h.config.BasePath)
 	if !ok {
-		WriteError(w, http.StatusBadRequest, ErrInvalidURI)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidURI)
 		return
 	}
 
 	pathParts := strings.Split(normalizedPath, "/")
 	if len(pathParts) != 3 {
-		WriteError(w, http.StatusBadRequest, ErrInvalidURI)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidURI)
 		return
 	}
 
@@ -273,13 +274,13 @@ func (h *StatusListHandler) SetIndex(w http.ResponseWriter, r *http.Request) {
 	// Validate extracted values
 	if !h.config.ValidateCountry(country) {
 		log.Printf("Invalid country from URI provided")
-		WriteError(w, http.StatusBadRequest, ErrInvalidCountry)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidCountry)
 		return
 	}
 
 	if !h.config.ValidateDoctype(doctype) {
 		log.Printf("Invalid doctype from URI provided")
-		WriteError(w, http.StatusBadRequest, ErrInvalidDoctype)
+		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidDoctype)
 		return
 	}
 
@@ -287,7 +288,7 @@ func (h *StatusListHandler) SetIndex(w http.ResponseWriter, r *http.Request) {
 	err = h.listManager.SetStatus(uri, country, doctype, listID, index, status)
 	if err != nil {
 		log.Printf("Failed to set status: %v", err)
-		WriteError(w, http.StatusInternalServerError, ErrStatusUpdateFailed)
+		errors.WriteError(w, http.StatusInternalServerError, errors.ErrStatusUpdateFailed)
 		return
 	}
 

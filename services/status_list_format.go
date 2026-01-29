@@ -364,55 +364,81 @@ func (f *StatusListFormatter) loadPrivateKey(keyPath string) (*ecdsa.PrivateKey,
 		return nil, err
 	}
 
-	// Find the PEM block, ignoring any bag attributes or other content
-	var block *pem.Block
-	remaining := keyData
-	for {
-		block, remaining = pem.Decode(remaining)
-		if block == nil {
-			return nil, fmt.Errorf("failed to find any PEM block in key file")
-		}
-		// Look for private key blocks
-		if strings.Contains(block.Type, "PRIVATE KEY") {
-			break
-		}
-		if len(remaining) == 0 {
-			return nil, fmt.Errorf("no private key block found in PEM file")
-		}
+	// Find the PEM block
+	block, err := f.findPrivateKeyPEMBlock(keyData)
+	if err != nil {
+		return nil, err
 	}
 
-	var privateKey interface{}
-	var keyBytes []byte = block.Bytes
-
-	// Only support unencrypted PEM and modern PKCS#8 encrypted keys
+	// Check for encrypted keys
 	if block.Type == "ENCRYPTED PRIVATE KEY" {
-		// This is a PKCS#8 encrypted private key - requires external decryption
 		return nil, fmt.Errorf("PKCS#8 encrypted private keys require external decryption. Please decrypt the key first: openssl pkcs8 -in encrypted_key.pem -out decrypted_key.pem")
 	}
 
-	// For unencrypted keys, try different formats
-	// 1. Try PKCS8 format first (most common format)
-	privateKey, err = x509.ParsePKCS8PrivateKey(keyBytes)
+	// Parse the key
+	privateKey, err := f.parsePrivateKeyBytes(block.Bytes)
 	if err != nil {
-		// 2. Try EC private key format
-		privateKey, err = x509.ParseECPrivateKey(keyBytes)
-		if err != nil {
-			// 3. Try PKCS1 RSA key format (in case it's RSA)
-			_, rsaErr := x509.ParsePKCS1PrivateKey(keyBytes)
-			if rsaErr == nil {
-				return nil, fmt.Errorf("RSA keys are not supported, need ECDSA key")
-			}
-			// Return the original EC parsing error
-			return nil, fmt.Errorf("failed to parse private key: %v", err)
-		}
+		return nil, err
 	}
 
+	// Validate it's an ECDSA key
 	ecdsaKey, ok := privateKey.(*ecdsa.PrivateKey)
 	if !ok {
 		return nil, fmt.Errorf("not an ECDSA private key, got type: %T", privateKey)
 	}
 
 	return ecdsaKey, nil
+}
+
+// findPrivateKeyPEMBlock finds the first private key PEM block in the data
+func (f *StatusListFormatter) findPrivateKeyPEMBlock(keyData []byte) (*pem.Block, error) {
+	var block *pem.Block
+	remaining := keyData
+
+	for {
+		block, remaining = pem.Decode(remaining)
+		if block == nil {
+			return nil, fmt.Errorf("failed to find any PEM block in key file")
+		}
+
+		// Look for private key blocks
+		if strings.Contains(block.Type, "PRIVATE KEY") {
+			return block, nil
+		}
+
+		if len(remaining) == 0 {
+			return nil, fmt.Errorf("no private key block found in PEM file")
+		}
+	}
+}
+
+// parsePrivateKeyBytes tries to parse private key bytes in various formats
+func (f *StatusListFormatter) parsePrivateKeyBytes(keyBytes []byte) (interface{}, error) {
+	// Try PKCS8 format first (most common format)
+	privateKey, err := x509.ParsePKCS8PrivateKey(keyBytes)
+	if err == nil {
+		return privateKey, nil
+	}
+
+	// Try EC private key format
+	privateKey, err = x509.ParseECPrivateKey(keyBytes)
+	if err == nil {
+		return privateKey, nil
+	}
+
+	// Check if it's an RSA key (not supported)
+	if f.isRSAKey(keyBytes) {
+		return nil, fmt.Errorf("RSA keys are not supported, need ECDSA key")
+	}
+
+	// Return the original EC parsing error
+	return nil, fmt.Errorf("failed to parse private key: %v", err)
+}
+
+// isRSAKey checks if the key bytes represent an RSA key
+func (f *StatusListFormatter) isRSAKey(keyBytes []byte) bool {
+	_, err := x509.ParsePKCS1PrivateKey(keyBytes)
+	return err == nil
 }
 
 // loadCertificate loads a certificate from file

@@ -65,11 +65,10 @@ func TestGetEnv(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Clean up environment variable
-			defer os.Unsetenv(tt.key)
 
 			// Set environment variable if needed
 			if tt.envValue != "" {
-				os.Setenv(tt.key, tt.envValue)
+				t.Setenv(tt.key, tt.envValue)
 			}
 
 			result := getEnv(tt.key, tt.defaultValue)
@@ -99,12 +98,9 @@ func TestGetEnvBool(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			const key = "TEST_BOOL_ENV"
-			if tt.value == "" {
-				os.Unsetenv(key)
-			} else {
-				os.Setenv(key, tt.value)
+			if tt.value != "" {
+				t.Setenv(key, tt.value)
 			}
-			t.Cleanup(func() { os.Unsetenv(key) })
 
 			result := getEnvBool(key, tt.defaultValue)
 			if result != tt.expected {
@@ -130,12 +126,9 @@ func TestGetEnvInt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			const key = "TEST_INT_ENV"
-			if tt.value == "" {
-				os.Unsetenv(key)
-			} else {
-				os.Setenv(key, tt.value)
+			if tt.value != "" {
+				t.Setenv(key, tt.value)
 			}
-			t.Cleanup(func() { os.Unsetenv(key) })
 
 			result := getEnvInt(key, tt.defaultValue)
 			if result != tt.expected {
@@ -225,11 +218,10 @@ func TestGetEnvArray(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Clean up environment variable
-			defer os.Unsetenv(tt.key)
 
 			// Set environment variable if needed
 			if tt.envValue != "" {
-				os.Setenv(tt.key, tt.envValue)
+				t.Setenv(tt.key, tt.envValue)
 			}
 
 			result := getEnvArray(tt.key)
@@ -242,7 +234,6 @@ func TestGetEnvArray(t *testing.T) {
 
 func TestGetAllowedDoctypes(t *testing.T) {
 	// Clean up environment variable
-	defer os.Unsetenv("ALLOWED_DOCTYPES")
 
 	t.Run("default doctypes when env var not set", func(t *testing.T) {
 		result := getAllowedDoctypes()
@@ -262,8 +253,7 @@ func TestGetAllowedDoctypes(t *testing.T) {
 	})
 
 	t.Run("custom doctypes from environment variable", func(t *testing.T) {
-		os.Setenv("ALLOWED_DOCTYPES", "custom1,custom2,custom3")
-		defer os.Unsetenv("ALLOWED_DOCTYPES")
+		t.Setenv("ALLOWED_DOCTYPES", "custom1,custom2,custom3")
 
 		result := getAllowedDoctypes()
 
@@ -279,8 +269,7 @@ func TestGetAllowedDoctypes(t *testing.T) {
 	})
 
 	t.Run("empty environment variable uses defaults", func(t *testing.T) {
-		os.Setenv("ALLOWED_DOCTYPES", "")
-		defer os.Unsetenv("ALLOWED_DOCTYPES")
+		t.Setenv("ALLOWED_DOCTYPES", "")
 
 		result := getAllowedDoctypes()
 
@@ -468,6 +457,7 @@ func TestLoad(t *testing.T) {
 		"API_KEY", "SERVICE_URL", "STATUS_LIST_DIR", "BACKUP_DIR", "LOG_DIR",
 		"PRIVATE_KEY_PATH", "CERTIFICATE_PATH", "COUNTRY_CODE", "ALLOWED_DOCTYPES",
 		"STATUS_LIST_CLEANUP_ENABLED", "STATUS_LIST_CLEANUP_HOUR", "STATUS_LIST_CLEANUP_MINUTE",
+		"STATUS_LIST_RENEWAL_ENABLED", "STATUS_LIST_RENEWAL_HOUR", "STATUS_LIST_RENEWAL_MINUTE",
 	}
 
 	for _, envVar := range envVars {
@@ -479,7 +469,7 @@ func TestLoad(t *testing.T) {
 	defer func() {
 		for _, envVar := range envVars {
 			if originalValue, exists := originalEnvVars[envVar]; exists && originalValue != "" {
-				os.Setenv(envVar, originalValue)
+				t.Setenv(envVar, originalValue)
 			} else {
 				os.Unsetenv(envVar)
 			}
@@ -495,9 +485,9 @@ func TestLoad(t *testing.T) {
 		defer os.RemoveAll(tempDir)
 
 		// Set temp directories for paths that will be created
-		os.Setenv("STATUS_LIST_DIR", filepath.Join(tempDir, "status_lists"))
-		os.Setenv("BACKUP_DIR", filepath.Join(tempDir, "backup"))
-		os.Setenv("LOG_DIR", filepath.Join(tempDir, "logs"))
+		t.Setenv("STATUS_LIST_DIR", filepath.Join(tempDir, "status_lists"))
+		t.Setenv("BACKUP_DIR", filepath.Join(tempDir, "backup"))
+		t.Setenv("LOG_DIR", filepath.Join(tempDir, "logs"))
 
 		config, err := Load()
 		if err != nil {
@@ -533,12 +523,24 @@ func TestLoad(t *testing.T) {
 			t.Error("Expected cleanup to be enabled by default")
 		}
 
-		if config.CleanupHour != 2 {
-			t.Errorf("Expected CleanupHour 2, got %d", config.CleanupHour)
+		if config.CleanupHour != 4 {
+			t.Errorf("Expected CleanupHour 4, got %d", config.CleanupHour)
 		}
 
 		if config.CleanupMinute != 0 {
 			t.Errorf("Expected CleanupMinute 0, got %d", config.CleanupMinute)
+		}
+
+		if !config.RenewalEnabled {
+			t.Error("Expected renewal to be enabled by default")
+		}
+
+		if config.RenewalHour != 12 {
+			t.Errorf("Expected RenewalHour 12, got %d", config.RenewalHour)
+		}
+
+		if config.RenewalMinute != 0 {
+			t.Errorf("Expected RenewalMinute 0, got %d", config.RenewalMinute)
 		}
 
 		// Test that default doctypes are loaded
@@ -573,19 +575,22 @@ func TestLoad(t *testing.T) {
 		defer os.RemoveAll(tempDir)
 
 		// Set custom environment variables
-		os.Setenv("API_KEY", "custom_api_key")
-		os.Setenv("SERVICE_URL", "https://example.com:9000/")
-		os.Setenv("BASE_PATH", "status-list/")
-		os.Setenv("STATUS_LIST_DIR", filepath.Join(tempDir, "custom_status_lists"))
-		os.Setenv("BACKUP_DIR", filepath.Join(tempDir, "custom_backup"))
-		os.Setenv("LOG_DIR", filepath.Join(tempDir, "custom_logs"))
-		os.Setenv("PRIVATE_KEY_PATH", "/custom/path/to/private.key")
-		os.Setenv("CERTIFICATE_PATH", "/custom/path/to/certificate.crt")
-		os.Setenv("COUNTRY_CODE", "EE")
-		os.Setenv("ALLOWED_DOCTYPES", "CUSTOM1,CUSTOM2,CUSTOM3")
-		os.Setenv("STATUS_LIST_CLEANUP_ENABLED", "false")
-		os.Setenv("STATUS_LIST_CLEANUP_HOUR", "5")
-		os.Setenv("STATUS_LIST_CLEANUP_MINUTE", "30")
+		t.Setenv("API_KEY", "custom_api_key")
+		t.Setenv("SERVICE_URL", "https://example.com:9000/")
+		t.Setenv("BASE_PATH", "status-list/")
+		t.Setenv("STATUS_LIST_DIR", filepath.Join(tempDir, "custom_status_lists"))
+		t.Setenv("BACKUP_DIR", filepath.Join(tempDir, "custom_backup"))
+		t.Setenv("LOG_DIR", filepath.Join(tempDir, "custom_logs"))
+		t.Setenv("PRIVATE_KEY_PATH", "/custom/path/to/private.key")
+		t.Setenv("CERTIFICATE_PATH", "/custom/path/to/certificate.crt")
+		t.Setenv("COUNTRY_CODE", "EE")
+		t.Setenv("ALLOWED_DOCTYPES", "CUSTOM1,CUSTOM2,CUSTOM3")
+		t.Setenv("STATUS_LIST_CLEANUP_ENABLED", "false")
+		t.Setenv("STATUS_LIST_CLEANUP_HOUR", "5")
+		t.Setenv("STATUS_LIST_CLEANUP_MINUTE", "30")
+		t.Setenv("STATUS_LIST_RENEWAL_ENABLED", "false")
+		t.Setenv("STATUS_LIST_RENEWAL_HOUR", "14")
+		t.Setenv("STATUS_LIST_RENEWAL_MINUTE", "45")
 
 		config, err := Load()
 		if err != nil {
@@ -629,6 +634,18 @@ func TestLoad(t *testing.T) {
 			t.Errorf("Expected CleanupMinute 30, got %d", config.CleanupMinute)
 		}
 
+		if config.RenewalEnabled {
+			t.Error("Expected renewal to be disabled via env")
+		}
+
+		if config.RenewalHour != 14 {
+			t.Errorf("Expected RenewalHour 14, got %d", config.RenewalHour)
+		}
+
+		if config.RenewalMinute != 45 {
+			t.Errorf("Expected RenewalMinute 45, got %d", config.RenewalMinute)
+		}
+
 		// Test custom doctypes
 		expectedDoctypes := map[string]bool{
 			"CUSTOM1": true,
@@ -657,7 +674,7 @@ func TestLoad(t *testing.T) {
 
 		// Set an invalid directory path that cannot be created
 		invalidPath := "/invalid"
-		os.Setenv("STATUS_LIST_DIR", invalidPath)
+		t.Setenv("STATUS_LIST_DIR", invalidPath)
 
 		_, err := Load()
 		if err == nil {
@@ -682,6 +699,9 @@ func TestConfigStruct(t *testing.T) {
 		CleanupEnabled:      true,
 		CleanupHour:         3,
 		CleanupMinute:       45,
+		RenewalEnabled:      true,
+		RenewalHour:         14,
+		RenewalMinute:       30,
 	}
 
 	// Test all fields are set correctly
@@ -815,7 +835,7 @@ func TestStorageConfigurationParsing(t *testing.T) {
 
 			// Set environment variables
 			for key, value := range tt.envVars {
-				os.Setenv(key, value)
+				t.Setenv(key, value)
 			}
 
 			// Load configuration

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package handlers
+package errors
 
 import (
 	"encoding/json"
@@ -67,7 +67,7 @@ const (
 	ErrStorageConfigMissing    ErrorCode = "storage_config_missing"
 	ErrStorageConnectionFailed ErrorCode = "storage_connection_failed"
 	ErrStorageOperationFailed  ErrorCode = "storage_operation_failed"
-	ErrVersionMismatch         ErrorCode = "version_mismatch"
+	ErrVersionMismatchCode     ErrorCode = "version_mismatch"
 )
 
 // ErrorResponse represents the standardized error response structure
@@ -124,7 +124,7 @@ var errorMessages = map[ErrorCode]string{
 	ErrStorageConfigMissing:    "Required storage configuration is missing.",
 	ErrStorageConnectionFailed: "Failed to connect to storage backend.",
 	ErrStorageOperationFailed:  "Storage operation failed.",
-	ErrVersionMismatch:         "Version mismatch detected. The file was modified by another process.",
+	ErrVersionMismatchCode:     "Version mismatch detected. The file was modified by another process.",
 }
 
 // GetErrorMessage returns the message for a given error code
