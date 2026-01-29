@@ -18,6 +18,7 @@ package renewal
 
 import (
 	"encoding/json"
+	stdErrors "errors"
 	"fmt"
 	"log"
 	"os"
@@ -26,14 +27,10 @@ import (
 	"time"
 
 	"github.com/unknovs/status-list-go/config"
+	"github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/models"
 	"github.com/unknovs/status-list-go/services"
 	"github.com/unknovs/status-list-go/services/storage"
-)
-
-const (
-	errNotFound  = "not found"
-	errNoSuchKey = "NoSuchKey"
 )
 
 // RenewalService handles the renewal of status lists
@@ -57,7 +54,7 @@ func (rs *RenewalService) RenewLists() error {
 	// Check if the status list directory exists
 	if _, err := os.Stat(rs.config.StatusListDir); os.IsNotExist(err) {
 		log.Printf("Error listing files: status list directory does not exist: %s", rs.config.StatusListDir)
-		return fmt.Errorf("status list directory does not exist: %s", rs.config.StatusListDir)
+		return fmt.Errorf("status list directory does not exist: %s: %w", rs.config.StatusListDir, err)
 	}
 
 	// Create formatter for JWT/CWT generation
@@ -105,7 +102,7 @@ func (rs *RenewalService) processListFile(filePath string, formatter *services.S
 	jsonData, err := rs.storage.Read(relativePath)
 	if err != nil {
 		// File might have been deleted by cleanup service, skip gracefully
-		if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
+		if stdErrors.Is(err, errors.ErrNotFound) {
 			log.Printf("File %s no longer exists (may have been cleaned up), skipping", filePath)
 			return nil
 		}
@@ -157,36 +154,14 @@ func (rs *RenewalService) renewTokenStatusList(dirPath string, statusListData *m
 	// In production, backups should be handled at the infrastructure level (S3 versioning, etc.)
 
 	// Regenerate JWT
-	jwtContent, err := formatter.GenerateJWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI)
-	if err != nil {
-		log.Printf("Failed to generate JWT for %s: %v", dirPath, err)
-	} else {
-		jwtPath := filepath.Join(dirPath, "token_status_list.jwt")
-		if err := rs.writeOrCreateFile(jwtPath, []byte(jwtContent)); err != nil {
-			// Check if directory was deleted (cleanup service removed expired list)
-			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
-				log.Printf("Directory %s no longer exists (cleaned up), skipping JWT write", dirPath)
-			} else {
-				log.Printf("Failed to write JWT file %s: %v", jwtPath, err)
-			}
-		}
-	}
+	rs.generateAndWrite(dirPath, "token_status_list.jwt", func() (string, error) {
+		return formatter.GenerateJWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI)
+	}, "JWT")
 
 	// Regenerate CWT
-	cwtContent, err := formatter.GenerateCWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI)
-	if err != nil {
-		log.Printf("Failed to generate CWT for %s: %v", dirPath, err)
-	} else {
-		cwtPath := filepath.Join(dirPath, "token_status_list.cwt")
-		if err := rs.writeOrCreateFile(cwtPath, []byte(cwtContent)); err != nil {
-			// Check if directory was deleted (cleanup service removed expired list)
-			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
-				log.Printf("Directory %s no longer exists (cleaned up), skipping CWT write", dirPath)
-			} else {
-				log.Printf("Failed to write CWT file %s: %v", cwtPath, err)
-			}
-		}
-	}
+	rs.generateAndWrite(dirPath, "token_status_list.cwt", func() (string, error) {
+		return formatter.GenerateCWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI)
+	}, "CWT")
 
 	return nil
 }
@@ -197,38 +172,40 @@ func (rs *RenewalService) renewIdentifierList(dirPath string, statusListData *mo
 	// In production, backups should be handled at the infrastructure level (S3 versioning, etc.)
 
 	// Regenerate JWT
-	jwtContent, err := formatter.GenerateIdentifierJWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI)
-	if err != nil {
-		log.Printf("Failed to generate identifier JWT for %s: %v", dirPath, err)
-	} else {
-		jwtPath := filepath.Join(dirPath, "identifier_list.jwt")
-		if err := rs.writeOrCreateFile(jwtPath, []byte(jwtContent)); err != nil {
-			// Check if directory was deleted (cleanup service removed expired list)
-			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
-				log.Printf("Directory %s no longer exists (cleaned up), skipping identifier JWT write", dirPath)
-			} else {
-				log.Printf("Failed to write identifier JWT file %s: %v", jwtPath, err)
-			}
-		}
-	}
+	rs.generateAndWrite(dirPath, "identifier_list.jwt", func() (string, error) {
+		return formatter.GenerateIdentifierJWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI)
+	}, "identifier JWT")
 
 	// Regenerate CWT
-	cwtContent, err := formatter.GenerateIdentifierCWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI)
-	if err != nil {
-		log.Printf("Failed to generate identifier CWT for %s: %v", dirPath, err)
-	} else {
-		cwtPath := filepath.Join(dirPath, "identifier_list.cwt")
-		if err := rs.writeOrCreateFile(cwtPath, []byte(cwtContent)); err != nil {
-			// Check if directory was deleted (cleanup service removed expired list)
-			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
-				log.Printf("Directory %s no longer exists (cleaned up), skipping identifier CWT write", dirPath)
-			} else {
-				log.Printf("Failed to write identifier CWT file %s: %v", cwtPath, err)
-			}
-		}
-	}
+	rs.generateAndWrite(dirPath, "identifier_list.cwt", func() (string, error) {
+		return formatter.GenerateIdentifierCWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI)
+	}, "identifier CWT")
 
 	return nil
+}
+
+// generateAndWrite handles the pattern of generating content and writing it to a file
+// with appropriate error handling and logging
+func (rs *RenewalService) generateAndWrite(
+	dirPath string,
+	filename string,
+	generateFunc func() (string, error),
+	description string,
+) {
+	content, err := generateFunc()
+	if err != nil {
+		log.Printf("Failed to generate %s for %s: %v", description, dirPath, err)
+		return
+	}
+
+	filePath := filepath.Join(dirPath, filename)
+	if err := rs.writeOrCreateFile(filePath, []byte(content)); err != nil {
+		if stdErrors.Is(err, errors.ErrNotFound) {
+			log.Printf("Directory %s no longer exists (cleaned up), skipping %s write", dirPath, description)
+		} else {
+			log.Printf("Failed to write %s file %s: %v", description, filePath, err)
+		}
+	}
 }
 
 // writeOrCreateFile is a helper that creates a file if it doesn't exist, or writes to it if it does
@@ -243,55 +220,110 @@ func (rs *RenewalService) writeOrCreateFile(path string, content []byte) error {
 		return rs.storage.Create(path, content)
 	}
 
-	// Retry up to 3 times on version mismatch
-	maxRetries := 3
+	// File exists, attempt write with retry logic
+	return rs.writeWithRetry(path, content, 3)
+}
+
+// writeWithRetry attempts to write with version control, retrying on conflicts
+func (rs *RenewalService) writeWithRetry(path string, content []byte, maxRetries int) error {
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// Verify file still exists before attempting write (might have been deleted by cleanup)
-		exists, err := rs.storage.Exists(path)
-		if err != nil {
-			return fmt.Errorf("failed to check file existence: %w", err)
+		result := rs.performWriteAttempt(path, content, attempt, maxRetries)
+		if result.shouldReturn {
+			return result.err
 		}
-		if !exists {
-			log.Printf("File %s no longer exists (may have been cleaned up), skipping write", path)
-			return nil // Gracefully skip - file was deleted
-		}
-
-		// Read the latest version immediately before writing
-		currentVersion, err := rs.storage.GetVersion(path)
-		if err != nil {
-			// File might have been deleted between Exists() and GetVersion()
-			if strings.Contains(err.Error(), errNoSuchKey) || strings.Contains(err.Error(), errNotFound) {
-				log.Printf("File %s was deleted during operation, skipping write", path)
-				return nil
-			}
-			return fmt.Errorf("failed to get current version: %w", err)
-		}
-
-		// Attempt write with incremented version
-		err = rs.storage.Write(path, content, currentVersion+1)
-		if err == nil {
-			// Success
-			if attempt > 1 {
-				log.Printf("Successfully wrote %s after %d attempts", path, attempt)
-			}
-			return nil
-		}
-
-		// Check if it's a version mismatch error
-		if strings.Contains(err.Error(), "version mismatch") {
-			if attempt < maxRetries {
-				log.Printf("Version conflict on %s (attempt %d/%d), retrying...", path, attempt, maxRetries)
-				time.Sleep(time.Millisecond * 100 * time.Duration(attempt)) // Exponential backoff
-				continue
-			}
-			return fmt.Errorf("failed after %d attempts: %w", maxRetries, err)
-		}
-
-		// Other error, don't retry
-		return err
 	}
 
 	return fmt.Errorf("failed to write after %d retries", maxRetries)
+}
+
+// writeAttemptResult contains the result of a single write attempt
+type writeAttemptResult struct {
+	shouldReturn bool  // true if the caller should return immediately
+	err          error // error to return (nil on success)
+}
+
+// performWriteAttempt performs a single write attempt and returns whether to continue
+func (rs *RenewalService) performWriteAttempt(path string, content []byte, attempt, maxRetries int) writeAttemptResult {
+	exists, err := rs.verifyFileExists(path)
+	if err != nil {
+		return writeAttemptResult{shouldReturn: true, err: err}
+	}
+	if !exists {
+		return writeAttemptResult{shouldReturn: true, err: nil}
+	}
+
+	currentVersion, err := rs.getCurrentVersion(path)
+	if err != nil {
+		if stdErrors.Is(err, errors.ErrNotFound) {
+			return writeAttemptResult{shouldReturn: true, err: nil}
+		}
+		return writeAttemptResult{shouldReturn: true, err: err}
+	}
+
+	err = rs.attemptWrite(path, content, currentVersion)
+	if err == nil {
+		if attempt > 1 {
+			log.Printf("Successfully wrote %s after %d attempts", path, attempt)
+		}
+		return writeAttemptResult{shouldReturn: true, err: nil}
+	}
+
+	shouldRetry, retryErr := rs.handleWriteError(err, path, attempt, maxRetries)
+	if !shouldRetry {
+		return writeAttemptResult{shouldReturn: true, err: retryErr}
+	}
+
+	return writeAttemptResult{shouldReturn: false, err: nil}
+}
+
+// verifyFileExists checks if file still exists before write attempt
+func (rs *RenewalService) verifyFileExists(path string) (bool, error) {
+	exists, err := rs.storage.Exists(path)
+	if err != nil {
+		return false, fmt.Errorf("failed to check file existence: %w", err)
+	}
+
+	if !exists {
+		log.Printf("File %s no longer exists (may have been cleaned up), skipping write", path)
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// getCurrentVersion retrieves the current file version
+// Returns (0, nil) if file was deleted - caller should handle gracefully
+func (rs *RenewalService) getCurrentVersion(path string) (int, error) {
+	currentVersion, err := rs.storage.GetVersion(path)
+	if err != nil {
+		if stdErrors.Is(err, errors.ErrNotFound) {
+			log.Printf("File %s was deleted during operation, skipping write", path)
+			return 0, errors.ErrNotFound
+		}
+		return 0, fmt.Errorf("failed to get current version: %w", err)
+	}
+	return currentVersion, nil
+}
+
+// attemptWrite performs a single write attempt
+func (rs *RenewalService) attemptWrite(path string, content []byte, currentVersion int) error {
+	return rs.storage.Write(path, content, currentVersion+1)
+}
+
+// handleWriteError determines if write should retry or fail
+// Returns (shouldRetry, error) - if shouldRetry is false, the error should be returned to caller
+func (rs *RenewalService) handleWriteError(err error, path string, attempt, maxRetries int) (bool, error) {
+	if !stdErrors.Is(err, errors.ErrVersionMismatch) {
+		return false, err
+	}
+
+	if attempt >= maxRetries {
+		return false, fmt.Errorf("failed after %d attempts: %w", maxRetries, err)
+	}
+
+	log.Printf("Version conflict on %s (attempt %d/%d), retrying...", path, attempt, maxRetries)
+	time.Sleep(time.Millisecond * 100 * time.Duration(attempt)) // Exponential backoff
+	return true, nil                                            // Signal to continue retrying
 }
 
 // copyFile is no longer used with storage abstraction

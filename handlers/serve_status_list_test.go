@@ -26,8 +26,11 @@ import (
 	"testing"
 
 	"github.com/unknovs/status-list-go/config"
+	"github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/services/storage"
 )
+
+const expectedErrorCodeMsg = "Expected error code %s, got %s"
 
 func setupTestConfig(t *testing.T) (*config.Config, string, storage.Storage) {
 	tempDir, err := os.MkdirTemp("", "serve_status_list_test")
@@ -91,7 +94,7 @@ func TestServeStatusList(t *testing.T) {
 		expectedStatus      int
 		expectedContentType string
 		expectedContent     string
-		expectedError       ErrorCode
+		expectedError       errors.ErrorCode
 	}{
 		{
 			name:                "Valid JWT request",
@@ -135,7 +138,7 @@ func TestServeStatusList(t *testing.T) {
 			path:           "/token_status_list/LV/PID/test123",
 			acceptHeader:   "application/statuslist+jwt",
 			expectedStatus: http.StatusMethodNotAllowed,
-			expectedError:  ErrBadRequest,
+			expectedError:  errors.ErrBadRequest,
 		},
 		{
 			name:           "Invalid method PUT",
@@ -143,7 +146,7 @@ func TestServeStatusList(t *testing.T) {
 			path:           "/token_status_list/LV/PID/test123",
 			acceptHeader:   "application/statuslist+jwt",
 			expectedStatus: http.StatusMethodNotAllowed,
-			expectedError:  ErrBadRequest,
+			expectedError:  errors.ErrBadRequest,
 		},
 		{
 			name:           "Invalid path - missing country",
@@ -151,7 +154,7 @@ func TestServeStatusList(t *testing.T) {
 			path:           "/token_status_list//PID/test123",
 			acceptHeader:   "application/statuslist+jwt",
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidPath,
+			expectedError:  errors.ErrInvalidPath,
 		},
 		{
 			name:           "Invalid path - missing doctype",
@@ -159,7 +162,7 @@ func TestServeStatusList(t *testing.T) {
 			path:           "/token_status_list/LV//test123",
 			acceptHeader:   "application/statuslist+jwt",
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidPath,
+			expectedError:  errors.ErrInvalidPath,
 		},
 		{
 			name:           "Invalid path - missing rand",
@@ -167,7 +170,7 @@ func TestServeStatusList(t *testing.T) {
 			path:           "/token_status_list/LV/PID/",
 			acceptHeader:   "application/statuslist+jwt",
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidPath,
+			expectedError:  errors.ErrInvalidPath,
 		},
 		{
 			name:           "Invalid path - too few parts",
@@ -175,7 +178,7 @@ func TestServeStatusList(t *testing.T) {
 			path:           "/token_status_list/LV/PID",
 			acceptHeader:   "application/statuslist+jwt",
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidPath,
+			expectedError:  errors.ErrInvalidPath,
 		},
 		{
 			name:           "Invalid path - too many parts",
@@ -183,7 +186,7 @@ func TestServeStatusList(t *testing.T) {
 			path:           "/token_status_list/LV/PID/test123/extra",
 			acceptHeader:   "application/statuslist+jwt",
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidPath,
+			expectedError:  errors.ErrInvalidPath,
 		},
 		{
 			name:           "Invalid country",
@@ -191,7 +194,7 @@ func TestServeStatusList(t *testing.T) {
 			path:           "/token_status_list/US/PID/test123",
 			acceptHeader:   "application/statuslist+jwt",
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidCountry,
+			expectedError:  errors.ErrInvalidCountry,
 		},
 		{
 			name:           "Invalid doctype",
@@ -199,7 +202,7 @@ func TestServeStatusList(t *testing.T) {
 			path:           "/token_status_list/LV/INVALID/test123",
 			acceptHeader:   "application/statuslist+jwt",
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidDoctype,
+			expectedError:  errors.ErrInvalidDoctype,
 		},
 		{
 			name:           "Invalid Accept header",
@@ -207,7 +210,7 @@ func TestServeStatusList(t *testing.T) {
 			path:           "/token_status_list/LV/PID/test123",
 			acceptHeader:   "application/json",
 			expectedStatus: http.StatusNotAcceptable,
-			expectedError:  ErrInvalidAccept,
+			expectedError:  errors.ErrInvalidAccept,
 		},
 		{
 			name:           "File not found",
@@ -215,7 +218,7 @@ func TestServeStatusList(t *testing.T) {
 			path:           "/token_status_list/LV/PID/nonexistent",
 			acceptHeader:   "application/statuslist+jwt",
 			expectedStatus: http.StatusNotFound,
-			expectedError:  ErrListNotFound,
+			expectedError:  errors.ErrListNotFound,
 		},
 	}
 
@@ -248,13 +251,13 @@ func TestServeStatusList(t *testing.T) {
 			}
 
 			if tt.expectedError != "" {
-				var errorResponse ErrorResponse
+				var errorResponse errors.ErrorResponse
 				err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
 				if err != nil {
 					t.Errorf("Failed to unmarshal error response: %v", err)
 				}
 				if errorResponse.Error.Code != tt.expectedError {
-					t.Errorf("Expected error code %s, got %s", tt.expectedError, errorResponse.Error.Code)
+					t.Errorf(expectedErrorCodeMsg, tt.expectedError, errorResponse.Error.Code)
 				}
 			}
 
@@ -348,13 +351,13 @@ func TestServeStatusListFileSystemErrors(t *testing.T) {
 			t.Errorf("Expected status %d, got %d", http.StatusNotFound, rr.Code)
 		}
 
-		var errorResponse ErrorResponse
+		var errorResponse errors.ErrorResponse
 		err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
 		if err != nil {
 			t.Errorf("Failed to unmarshal error response: %v", err)
 		}
-		if errorResponse.Error.Code != ErrListNotFound {
-			t.Errorf("Expected error code %s, got %s", ErrListNotFound, errorResponse.Error.Code)
+		if errorResponse.Error.Code != errors.ErrListNotFound {
+			t.Errorf(expectedErrorCodeMsg, errors.ErrListNotFound, errorResponse.Error.Code)
 		}
 	})
 }
@@ -370,31 +373,31 @@ func TestServeStatusListPathParsing(t *testing.T) {
 		name         string
 		path         string
 		expectedCode int
-		expectedErr  ErrorCode
+		expectedErr  errors.ErrorCode
 	}{
 		{
 			name:         "Empty path after prefix",
 			path:         "/token_status_list/",
 			expectedCode: http.StatusBadRequest,
-			expectedErr:  ErrInvalidPath,
+			expectedErr:  errors.ErrInvalidPath,
 		},
 		{
 			name:         "Only slash after prefix",
 			path:         "/token_status_list//",
 			expectedCode: http.StatusBadRequest,
-			expectedErr:  ErrInvalidPath,
+			expectedErr:  errors.ErrInvalidPath,
 		},
 		{
 			name:         "Path with special characters",
 			path:         "/token_status_list/LV/PID/test@123",
 			expectedCode: http.StatusNotFound,
-			expectedErr:  ErrListNotFound,
+			expectedErr:  errors.ErrListNotFound,
 		},
 		{
 			name:         "Path with URL encoding",
 			path:         "/token_status_list/LV/PID/test%20123",
 			expectedCode: http.StatusNotFound,
-			expectedErr:  ErrListNotFound,
+			expectedErr:  errors.ErrListNotFound,
 		},
 	}
 
@@ -411,13 +414,13 @@ func TestServeStatusListPathParsing(t *testing.T) {
 			}
 
 			if tt.expectedErr != "" {
-				var errorResponse ErrorResponse
+				var errorResponse errors.ErrorResponse
 				err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
 				if err != nil {
 					t.Errorf("Failed to unmarshal error response: %v", err)
 				}
 				if errorResponse.Error.Code != tt.expectedErr {
-					t.Errorf("Expected error code %s, got %s", tt.expectedErr, errorResponse.Error.Code)
+					t.Errorf(expectedErrorCodeMsg, tt.expectedErr, errorResponse.Error.Code)
 				}
 			}
 		})
@@ -535,13 +538,13 @@ func TestServeStatusListMissingFiles(t *testing.T) {
 			t.Errorf("Expected status %d, got %d", http.StatusNotFound, rr.Code)
 		}
 
-		var errorResponse ErrorResponse
+		var errorResponse errors.ErrorResponse
 		err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
 		if err != nil {
 			t.Errorf("Failed to unmarshal error response: %v", err)
 		}
-		if errorResponse.Error.Code != ErrListNotFound {
-			t.Errorf("Expected error code %s, got %s", ErrListNotFound, errorResponse.Error.Code)
+		if errorResponse.Error.Code != errors.ErrListNotFound {
+			t.Errorf(expectedErrorCodeMsg, errors.ErrListNotFound, errorResponse.Error.Code)
 		}
 	})
 

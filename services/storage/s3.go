@@ -3,7 +3,7 @@ package storage
 import (
 	"bytes"
 	"context"
-	"errors"
+	stdErrors "errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/unknovs/status-list-go/errors"
 )
 
 // S3API defines the S3 operations used by S3Storage
@@ -46,13 +47,13 @@ type S3Config struct {
 // NewS3Storage creates a new S3 storage backend with connection validation
 func NewS3Storage(cfg S3Config) (*S3Storage, error) {
 	if cfg.Bucket == "" {
-		return nil, errors.New("S3 bucket is required")
+		return nil, stdErrors.New("S3 bucket is required")
 	}
 	if cfg.AccessKeyID == "" {
-		return nil, errors.New("S3 access key ID is required")
+		return nil, stdErrors.New("S3 access key ID is required")
 	}
 	if cfg.SecretAccessKey == "" {
-		return nil, errors.New("S3 secret access key is required")
+		return nil, stdErrors.New("S3 secret access key is required")
 	}
 
 	ctx := context.Background()
@@ -158,7 +159,7 @@ func (s *S3Storage) Create(path string, content []byte) error {
 		return fmt.Errorf("failed to check if object exists: %w", err)
 	}
 	if exists {
-		return fmt.Errorf("object already exists: %s", path)
+		return fmt.Errorf("%w: %s", errors.ErrAlreadyExists, path)
 	}
 
 	// Upload object with version metadata
@@ -191,8 +192,8 @@ func (s *S3Storage) Read(path string) ([]byte, error) {
 
 	if err != nil {
 		var notFound *types.NoSuchKey
-		if errors.As(err, &notFound) {
-			return nil, fmt.Errorf("object not found: %s", path)
+		if stdErrors.As(err, &notFound) {
+			return nil, fmt.Errorf("%w: %s", errors.ErrNotFound, path)
 		}
 		return nil, fmt.Errorf("failed to read object from S3: %w", err)
 	}
@@ -216,7 +217,7 @@ func (s *S3Storage) Write(path string, content []byte, version int) error {
 	if err != nil {
 		// If object doesn't exist, treat as version 0 (new object)
 		var nsk *types.NoSuchKey
-		if errors.As(err, &nsk) {
+		if stdErrors.As(err, &nsk) {
 			return fmt.Errorf("failed to get current version: %w", err)
 		}
 		currentVersion = 0
@@ -224,7 +225,7 @@ func (s *S3Storage) Write(path string, content []byte, version int) error {
 
 	// Validate version (optimistic locking)
 	if version != currentVersion+1 {
-		return fmt.Errorf("version mismatch: expected %d, got %d", currentVersion+1, version)
+		return fmt.Errorf("%w: expected %d, got %d", errors.ErrVersionMismatch, currentVersion+1, version)
 	}
 
 	// Upload object with updated version metadata
@@ -257,7 +258,7 @@ func (s *S3Storage) Exists(path string) (bool, error) {
 
 	if err != nil {
 		var notFound *types.NotFound
-		if errors.As(err, &notFound) {
+		if stdErrors.As(err, &notFound) {
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to check object existence: %w", err)

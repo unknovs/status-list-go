@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/unknovs/status-list-go/config"
+	"github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/models"
 	"github.com/unknovs/status-list-go/services/storage"
 )
@@ -66,7 +67,7 @@ func setupStatusListTestConfig(t *testing.T) (*config.Config, string, storage.St
 	return cfg, tempDir, stor
 }
 
-func createTestStatusList(t *testing.T, cfg *config.Config, stor storage.Storage, country, doctype, randID string) {
+func createTestStatusList(t *testing.T, stor storage.Storage, country, doctype, randID string) {
 	// Create a test status list
 	statusList := models.NewIssuerStatusList(1, 100, "random")
 	identifierList := make(map[string]int)
@@ -129,7 +130,7 @@ func TestTakeIndex(t *testing.T) {
 		headers        map[string]string
 		formData       map[string]string
 		expectedStatus int
-		expectedError  ErrorCode
+		expectedError  errors.ErrorCode
 	}{
 		{
 			name:   "Valid request",
@@ -148,13 +149,13 @@ func TestTakeIndex(t *testing.T) {
 			name:           "Invalid method GET",
 			method:         "GET",
 			expectedStatus: http.StatusMethodNotAllowed,
-			expectedError:  ErrBadRequest,
+			expectedError:  errors.ErrBadRequest,
 		},
 		{
 			name:           "Invalid method PUT",
 			method:         "PUT",
 			expectedStatus: http.StatusMethodNotAllowed,
-			expectedError:  ErrBadRequest,
+			expectedError:  errors.ErrBadRequest,
 		},
 		{
 			name:   "Missing API key",
@@ -165,7 +166,7 @@ func TestTakeIndex(t *testing.T) {
 				"expiry_date": time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
 			},
 			expectedStatus: http.StatusUnauthorized,
-			expectedError:  ErrInvalidAPIKey,
+			expectedError:  errors.ErrInvalidAPIKey,
 		},
 		{
 			name:   "Invalid API key",
@@ -179,7 +180,7 @@ func TestTakeIndex(t *testing.T) {
 				"expiry_date": time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
 			},
 			expectedStatus: http.StatusUnauthorized,
-			expectedError:  ErrInvalidAPIKey,
+			expectedError:  errors.ErrInvalidAPIKey,
 		},
 		{
 			name:   "Invalid doctype",
@@ -193,7 +194,7 @@ func TestTakeIndex(t *testing.T) {
 				"expiry_date": time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidDoctype,
+			expectedError:  errors.ErrInvalidDoctype,
 		},
 		{
 			name:   "Invalid country",
@@ -207,7 +208,7 @@ func TestTakeIndex(t *testing.T) {
 				"expiry_date": time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidCountry,
+			expectedError:  errors.ErrInvalidCountry,
 		},
 		{
 			name:   "Invalid expiry date format",
@@ -221,7 +222,7 @@ func TestTakeIndex(t *testing.T) {
 				"expiry_date": "invalid-date",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidExpiryDate,
+			expectedError:  errors.ErrInvalidExpiryDate,
 		},
 		{
 			name:   "Past expiry date",
@@ -235,7 +236,7 @@ func TestTakeIndex(t *testing.T) {
 				"expiry_date": "2020-01-01",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidExpiryDate,
+			expectedError:  errors.ErrInvalidExpiryDate,
 		},
 		{
 			name:   "Missing doctype",
@@ -248,7 +249,7 @@ func TestTakeIndex(t *testing.T) {
 				"expiry_date": time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidDoctype,
+			expectedError:  errors.ErrInvalidDoctype,
 		},
 		{
 			name:   "Missing country",
@@ -261,7 +262,7 @@ func TestTakeIndex(t *testing.T) {
 				"expiry_date": time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidCountry,
+			expectedError:  errors.ErrInvalidCountry,
 		},
 		{
 			name:   "Missing expiry date",
@@ -274,7 +275,7 @@ func TestTakeIndex(t *testing.T) {
 				"country": "LV",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidExpiryDate,
+			expectedError:  errors.ErrInvalidExpiryDate,
 		},
 	}
 
@@ -302,7 +303,7 @@ func TestTakeIndex(t *testing.T) {
 			}
 
 			if tt.expectedError != "" {
-				var errorResponse ErrorResponse
+				var errorResponse errors.ErrorResponse
 				err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
 				if err != nil {
 					t.Errorf("Failed to unmarshal error response: %v", err)
@@ -367,14 +368,14 @@ func TestGetIndex(t *testing.T) {
 	handler := NewStatusListHandler(cfg, stor)
 
 	// Create a test status list
-	createTestStatusList(t, cfg, stor, "LV", "PID", "test-rand")
+	createTestStatusList(t, stor, "LV", "PID", "test-rand")
 
 	tests := []struct {
 		name           string
 		method         string
 		queryParams    map[string]string
 		expectedStatus int
-		expectedError  ErrorCode
+		expectedError  errors.ErrorCode
 		expectedBody   string
 	}{
 		{
@@ -401,7 +402,7 @@ func TestGetIndex(t *testing.T) {
 			name:           "Invalid method POST",
 			method:         "POST",
 			expectedStatus: http.StatusMethodNotAllowed,
-			expectedError:  ErrBadRequest,
+			expectedError:  errors.ErrBadRequest,
 		},
 		{
 			name:   "Missing URI",
@@ -410,7 +411,7 @@ func TestGetIndex(t *testing.T) {
 				"idx": "0",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrBadRequest,
+			expectedError:  errors.ErrBadRequest,
 		},
 		{
 			name:   "Missing index and id",
@@ -419,7 +420,7 @@ func TestGetIndex(t *testing.T) {
 				"uri": "",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrBadRequest,
+			expectedError:  errors.ErrBadRequest,
 		},
 		{
 			name:   "Invalid index format",
@@ -429,7 +430,7 @@ func TestGetIndex(t *testing.T) {
 				"idx": "invalid",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidIndex,
+			expectedError:  errors.ErrInvalidIndex,
 		},
 		{
 			name:   "Invalid URI format",
@@ -439,7 +440,7 @@ func TestGetIndex(t *testing.T) {
 				"idx": "0",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidURI,
+			expectedError:  errors.ErrInvalidURI,
 		},
 		{
 			name:   "Non-existent URI",
@@ -449,7 +450,7 @@ func TestGetIndex(t *testing.T) {
 				"idx": "0",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrListNotFound,
+			expectedError:  errors.ErrListNotFound,
 		},
 		{
 			name:   "Index within range but high",
@@ -485,7 +486,7 @@ func TestGetIndex(t *testing.T) {
 			}
 
 			if tt.expectedError != "" {
-				var errorResponse ErrorResponse
+				var errorResponse errors.ErrorResponse
 				err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
 				if err != nil {
 					t.Errorf("Failed to unmarshal error response: %v", err)
@@ -522,7 +523,7 @@ func TestSetIndex(t *testing.T) {
 		headers        map[string]string
 		formData       map[string]string
 		expectedStatus int
-		expectedError  ErrorCode
+		expectedError  errors.ErrorCode
 		expectedBody   string
 		setupRandID    string
 	}{
@@ -560,7 +561,7 @@ func TestSetIndex(t *testing.T) {
 			name:           "Invalid method GET",
 			method:         "GET",
 			expectedStatus: http.StatusMethodNotAllowed,
-			expectedError:  ErrBadRequest,
+			expectedError:  errors.ErrBadRequest,
 		},
 		{
 			name:   "Missing API key",
@@ -571,7 +572,7 @@ func TestSetIndex(t *testing.T) {
 				"status": "1",
 			},
 			expectedStatus: http.StatusUnauthorized,
-			expectedError:  ErrUnauthorizedAccess,
+			expectedError:  errors.ErrUnauthorizedAccess,
 		},
 		{
 			name:   "Invalid API key",
@@ -585,7 +586,7 @@ func TestSetIndex(t *testing.T) {
 				"status": "1",
 			},
 			expectedStatus: http.StatusUnauthorized,
-			expectedError:  ErrUnauthorizedAccess,
+			expectedError:  errors.ErrUnauthorizedAccess,
 		},
 		{
 			name:   "Missing URI",
@@ -598,7 +599,7 @@ func TestSetIndex(t *testing.T) {
 				"status": "1",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrBadRequest,
+			expectedError:  errors.ErrBadRequest,
 		},
 		{
 			name:   "Missing index and id",
@@ -611,7 +612,7 @@ func TestSetIndex(t *testing.T) {
 				"status": "1",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrBadRequest,
+			expectedError:  errors.ErrBadRequest,
 		},
 		{
 			name:   "Missing status",
@@ -624,7 +625,7 @@ func TestSetIndex(t *testing.T) {
 				"idx": "0",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrBadRequest,
+			expectedError:  errors.ErrBadRequest,
 		},
 		{
 			name:   "Invalid index format",
@@ -638,7 +639,7 @@ func TestSetIndex(t *testing.T) {
 				"status": "1",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidIndex,
+			expectedError:  errors.ErrInvalidIndex,
 		},
 		{
 			name:   "Invalid status format",
@@ -652,7 +653,7 @@ func TestSetIndex(t *testing.T) {
 				"status": "invalid",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidStatus,
+			expectedError:  errors.ErrInvalidStatus,
 		},
 		{
 			name:   "Invalid status value (not 1)",
@@ -666,7 +667,7 @@ func TestSetIndex(t *testing.T) {
 				"status": "2",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidStatus,
+			expectedError:  errors.ErrInvalidStatus,
 		},
 		{
 			name:   "Invalid URI format",
@@ -680,7 +681,7 @@ func TestSetIndex(t *testing.T) {
 				"status": "1",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidURI,
+			expectedError:  errors.ErrInvalidURI,
 		},
 		{
 			name:   "URI with insufficient path parts",
@@ -694,7 +695,7 @@ func TestSetIndex(t *testing.T) {
 				"status": "1",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidURI,
+			expectedError:  errors.ErrInvalidURI,
 		},
 		{
 			name:   "URI with invalid country",
@@ -708,7 +709,7 @@ func TestSetIndex(t *testing.T) {
 				"status": "1",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidCountry,
+			expectedError:  errors.ErrInvalidCountry,
 		},
 		{
 			name:   "URI with invalid doctype",
@@ -722,7 +723,7 @@ func TestSetIndex(t *testing.T) {
 				"status": "1",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  ErrInvalidDoctype,
+			expectedError:  errors.ErrInvalidDoctype,
 		},
 	}
 
@@ -730,7 +731,7 @@ func TestSetIndex(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set up test data for valid requests
 			if tt.setupRandID != "" {
-				createTestStatusList(t, cfg, stor, "LV", "PID", tt.setupRandID)
+				createTestStatusList(t, stor, "LV", "PID", tt.setupRandID)
 				testURI := fmt.Sprintf("http://localhost:8080/token_status_list/LV/PID/%s", tt.setupRandID)
 				tt.formData["uri"] = testURI
 			}
@@ -757,7 +758,7 @@ func TestSetIndex(t *testing.T) {
 			}
 
 			if tt.expectedError != "" {
-				var errorResponse ErrorResponse
+				var errorResponse errors.ErrorResponse
 				err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
 				if err != nil {
 					t.Errorf("Failed to unmarshal error response: %v", err)
@@ -934,13 +935,13 @@ func TestTakeIndexFormParsingError(t *testing.T) {
 		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rr.Code)
 	}
 
-	var errorResponse ErrorResponse
+	var errorResponse errors.ErrorResponse
 	err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
 	if err != nil {
 		t.Errorf("Failed to unmarshal error response: %v", err)
 	}
-	if errorResponse.Error.Code != ErrParseForm {
-		t.Errorf("Expected error code %s, got %s", ErrParseForm, errorResponse.Error.Code)
+	if errorResponse.Error.Code != errors.ErrParseForm {
+		t.Errorf("Expected error code %s, got %s", errors.ErrParseForm, errorResponse.Error.Code)
 	}
 }
 
@@ -962,12 +963,12 @@ func TestSetIndexFormParsingError(t *testing.T) {
 		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rr.Code)
 	}
 
-	var errorResponse ErrorResponse
+	var errorResponse errors.ErrorResponse
 	err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
 	if err != nil {
 		t.Errorf("Failed to unmarshal error response: %v", err)
 	}
-	if errorResponse.Error.Code != ErrParseForm {
-		t.Errorf("Expected error code %s, got %s", ErrParseForm, errorResponse.Error.Code)
+	if errorResponse.Error.Code != errors.ErrParseForm {
+		t.Errorf("Expected error code %s, got %s", errors.ErrParseForm, errorResponse.Error.Code)
 	}
 }

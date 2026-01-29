@@ -13,6 +13,7 @@ import (
 	"github.com/valyala/fasthttp/fasthttpadaptor"
 
 	"github.com/unknovs/status-list-go/config"
+	"github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/handlers"
 )
 
@@ -177,14 +178,14 @@ func serveSwaggerJSON(w http.ResponseWriter, r *http.Request, cfg *config.Config
 	swaggerPath, paths := locateSwaggerFile()
 	if swaggerPath == "" {
 		message := "swagger.json not found. Please ensure swagger.json exists in the static directory. Paths tried: " + strings.Join(paths, ", ")
-		handlers.WriteCustomError(w, http.StatusNotFound, handlers.ErrListNotFound, message)
+		errors.WriteCustomError(w, http.StatusNotFound, errors.ErrListNotFound, message)
 
 		return
 	}
 
 	swaggerDoc, err := readSwagger(swaggerPath)
 	if err != nil {
-		handlers.WriteCustomError(w, http.StatusInternalServerError, handlers.ErrListNotFound, err.Error())
+		errors.WriteCustomError(w, http.StatusInternalServerError, errors.ErrListNotFound, err.Error())
 
 		return
 	}
@@ -193,7 +194,7 @@ func serveSwaggerJSON(w http.ResponseWriter, r *http.Request, cfg *config.Config
 
 	payload, err := json.Marshal(swaggerDoc)
 	if err != nil {
-		handlers.WriteCustomError(w, http.StatusInternalServerError, handlers.ErrListNotFound,
+		errors.WriteCustomError(w, http.StatusInternalServerError, errors.ErrListNotFound,
 			"Failed to serialize modified swagger.json: "+err.Error())
 
 		return
