@@ -154,36 +154,14 @@ func (rs *RenewalService) renewTokenStatusList(dirPath string, statusListData *m
 	// In production, backups should be handled at the infrastructure level (S3 versioning, etc.)
 
 	// Regenerate JWT
-	jwtContent, err := formatter.GenerateJWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI)
-	if err != nil {
-		log.Printf("Failed to generate JWT for %s: %v", dirPath, err)
-	} else {
-		jwtPath := filepath.Join(dirPath, "token_status_list.jwt")
-		if err := rs.writeOrCreateFile(jwtPath, []byte(jwtContent)); err != nil {
-			// Check if directory was deleted (cleanup service removed expired list)
-			if stdErrors.Is(err, errors.ErrNotFound) {
-				log.Printf("Directory %s no longer exists (cleaned up), skipping JWT write", dirPath)
-			} else {
-				log.Printf("Failed to write JWT file %s: %v", jwtPath, err)
-			}
-		}
-	}
+	rs.generateAndWrite(dirPath, "token_status_list.jwt", func() (string, error) {
+		return formatter.GenerateJWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI)
+	}, "JWT")
 
 	// Regenerate CWT
-	cwtContent, err := formatter.GenerateCWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI)
-	if err != nil {
-		log.Printf("Failed to generate CWT for %s: %v", dirPath, err)
-	} else {
-		cwtPath := filepath.Join(dirPath, "token_status_list.cwt")
-		if err := rs.writeOrCreateFile(cwtPath, []byte(cwtContent)); err != nil {
-			// Check if directory was deleted (cleanup service removed expired list)
-			if stdErrors.Is(err, errors.ErrNotFound) {
-				log.Printf("Directory %s no longer exists (cleaned up), skipping CWT write", dirPath)
-			} else {
-				log.Printf("Failed to write CWT file %s: %v", cwtPath, err)
-			}
-		}
-	}
+	rs.generateAndWrite(dirPath, "token_status_list.cwt", func() (string, error) {
+		return formatter.GenerateCWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI)
+	}, "CWT")
 
 	return nil
 }
@@ -194,38 +172,40 @@ func (rs *RenewalService) renewIdentifierList(dirPath string, statusListData *mo
 	// In production, backups should be handled at the infrastructure level (S3 versioning, etc.)
 
 	// Regenerate JWT
-	jwtContent, err := formatter.GenerateIdentifierJWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI)
-	if err != nil {
-		log.Printf("Failed to generate identifier JWT for %s: %v", dirPath, err)
-	} else {
-		jwtPath := filepath.Join(dirPath, "identifier_list.jwt")
-		if err := rs.writeOrCreateFile(jwtPath, []byte(jwtContent)); err != nil {
-			// Check if directory was deleted (cleanup service removed expired list)
-			if stdErrors.Is(err, errors.ErrNotFound) {
-				log.Printf("Directory %s no longer exists (cleaned up), skipping identifier JWT write", dirPath)
-			} else {
-				log.Printf("Failed to write identifier JWT file %s: %v", jwtPath, err)
-			}
-		}
-	}
+	rs.generateAndWrite(dirPath, "identifier_list.jwt", func() (string, error) {
+		return formatter.GenerateIdentifierJWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI)
+	}, "identifier JWT")
 
 	// Regenerate CWT
-	cwtContent, err := formatter.GenerateIdentifierCWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI)
-	if err != nil {
-		log.Printf("Failed to generate identifier CWT for %s: %v", dirPath, err)
-	} else {
-		cwtPath := filepath.Join(dirPath, "identifier_list.cwt")
-		if err := rs.writeOrCreateFile(cwtPath, []byte(cwtContent)); err != nil {
-			// Check if directory was deleted (cleanup service removed expired list)
-			if stdErrors.Is(err, errors.ErrNotFound) {
-				log.Printf("Directory %s no longer exists (cleaned up), skipping identifier CWT write", dirPath)
-			} else {
-				log.Printf("Failed to write identifier CWT file %s: %v", cwtPath, err)
-			}
-		}
-	}
+	rs.generateAndWrite(dirPath, "identifier_list.cwt", func() (string, error) {
+		return formatter.GenerateIdentifierCWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI)
+	}, "identifier CWT")
 
 	return nil
+}
+
+// generateAndWrite handles the pattern of generating content and writing it to a file
+// with appropriate error handling and logging
+func (rs *RenewalService) generateAndWrite(
+	dirPath string,
+	filename string,
+	generateFunc func() (string, error),
+	description string,
+) {
+	content, err := generateFunc()
+	if err != nil {
+		log.Printf("Failed to generate %s for %s: %v", description, dirPath, err)
+		return
+	}
+
+	filePath := filepath.Join(dirPath, filename)
+	if err := rs.writeOrCreateFile(filePath, []byte(content)); err != nil {
+		if stdErrors.Is(err, errors.ErrNotFound) {
+			log.Printf("Directory %s no longer exists (cleaned up), skipping %s write", dirPath, description)
+		} else {
+			log.Printf("Failed to write %s file %s: %v", description, filePath, err)
+		}
+	}
 }
 
 // writeOrCreateFile is a helper that creates a file if it doesn't exist, or writes to it if it does
