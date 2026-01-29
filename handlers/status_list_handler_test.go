@@ -67,7 +67,7 @@ func setupStatusListTestConfig(t *testing.T) (*config.Config, string, storage.St
 	return cfg, tempDir, stor
 }
 
-func createTestStatusList(t *testing.T, cfg *config.Config, stor storage.Storage, country, doctype, randID string) {
+func createTestStatusList(t *testing.T, stor storage.Storage, country, doctype, randID string) {
 	// Create a test status list
 	statusList := models.NewIssuerStatusList(1, 100, "random")
 	identifierList := make(map[string]int)
@@ -368,7 +368,7 @@ func TestGetIndex(t *testing.T) {
 	handler := NewStatusListHandler(cfg, stor)
 
 	// Create a test status list
-	createTestStatusList(t, cfg, stor, "LV", "PID", "test-rand")
+	createTestStatusList(t, stor, "LV", "PID", "test-rand")
 
 	tests := []struct {
 		name           string
@@ -731,7 +731,7 @@ func TestSetIndex(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set up test data for valid requests
 			if tt.setupRandID != "" {
-				createTestStatusList(t, cfg, stor, "LV", "PID", tt.setupRandID)
+				createTestStatusList(t, stor, "LV", "PID", tt.setupRandID)
 				testURI := fmt.Sprintf("http://localhost:8080/token_status_list/LV/PID/%s", tt.setupRandID)
 				tt.formData["uri"] = testURI
 			}

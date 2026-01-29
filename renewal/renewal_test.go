@@ -34,6 +34,10 @@ import (
 	"github.com/unknovs/status-list-go/services/storage"
 )
 
+const testContent = "test content"
+const testStatusListDir = "/tmp/test"
+const testFileName = "test.txt"
+
 // Setup test environment
 func setupTestEnvironment(t *testing.T) (string, string, *config.Config, storage.Storage) {
 	tempDir, err := os.MkdirTemp("", "renewal_test")
@@ -290,7 +294,7 @@ func TestRenewListsNonExistentDirectory(t *testing.T) {
 			setup: func() (string, string) {
 				src := filepath.Join(tempDir, "source.txt")
 				dst := filepath.Join(tempDir, "nonexistent", "destination.txt")
-				os.WriteFile(src, []byte("test content"), 0644)
+				os.WriteFile(src, []byte(testContent), 0644)
 				return src, dst
 			},
 			wantErr:     true,
@@ -303,7 +307,7 @@ func TestRenewListsNonExistentDirectory(t *testing.T) {
 				// This is tricky to test directly, but we can test a symlink to nonexistent file
 				src := filepath.Join(tempDir, "source.txt")
 				dst := filepath.Join(tempDir, "destination.txt")
-				os.WriteFile(src, []byte("test content"), 0644)
+				os.WriteFile(src, []byte(testContent), 0644)
 				return src, dst
 			},
 			wantErr:     false, // This case will pass normally
@@ -312,7 +316,7 @@ func TestRenewListsNonExistentDirectory(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			// Since copyFile functionality has been removed, just test that setup works
 			tt.setup()
 			// Test passes if setup doesn't panic
@@ -408,7 +412,7 @@ func TestRenewListsWalkErrors(t *testing.T) {
 }
 
 // captureLogOutput captures log output for testing
-func captureLogOutput(t *testing.T, testFunc func()) string {
+func captureLogOutput(_ *testing.T, testFunc func()) string {
 	// Save the original log output
 	originalOutput := log.Writer()
 
@@ -790,9 +794,9 @@ func (m *MockStorage) Read(path string) ([]byte, error) {
 }
 
 // TestWriteOrCreateFile_NewFile tests creating a new file
-func TestWriteOrCreateFile_NewFile(t *testing.T) {
+func TestWriteOrCreateFileNewFile(t *testing.T) {
 	cfg := &config.Config{
-		StatusListDir: "/tmp/test",
+		StatusListDir: testStatusListDir,
 	}
 
 	mockStorage := &MockStorage{
@@ -800,8 +804,8 @@ func TestWriteOrCreateFile_NewFile(t *testing.T) {
 			return false, nil
 		},
 		createFunc: func(path string, content []byte) error {
-			if string(content) != "test content" {
-				t.Errorf("Expected content 'test content', got '%s'", string(content))
+			if string(content) != testContent {
+				t.Errorf("Expected content '%s', got '%s'", testContent, string(content))
 			}
 			return nil
 		},
@@ -812,7 +816,7 @@ func TestWriteOrCreateFile_NewFile(t *testing.T) {
 		storage: mockStorage,
 	}
 
-	err := rs.writeOrCreateFile("test.txt", []byte("test content"))
+	err := rs.writeOrCreateFile(testFileName, []byte(testContent))
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
@@ -823,9 +827,9 @@ func TestWriteOrCreateFile_NewFile(t *testing.T) {
 }
 
 // TestWriteOrCreateFile_VersionConflictRetry tests retry logic on version mismatch
-func TestWriteOrCreateFile_VersionConflictRetry(t *testing.T) {
+func TestWriteOrCreateFileVersionConflictRetry(t *testing.T) {
 	cfg := &config.Config{
-		StatusListDir: "/tmp/test",
+		StatusListDir: testStatusListDir,
 	}
 
 	attemptCount := 0
@@ -852,7 +856,7 @@ func TestWriteOrCreateFile_VersionConflictRetry(t *testing.T) {
 		storage: mockStorage,
 	}
 
-	err := rs.writeOrCreateFile("test.txt", []byte("test content"))
+	err := rs.writeOrCreateFile(testFileName, []byte(testContent))
 	if err != nil {
 		t.Errorf("Expected success after retries, got error: %v", err)
 	}
@@ -881,9 +885,9 @@ func (e *versionMismatchError) Unwrap() error {
 }
 
 // TestWriteOrCreateFile_MaxRetriesExceeded tests failure after max retries
-func TestWriteOrCreateFile_MaxRetriesExceeded(t *testing.T) {
+func TestWriteOrCreateFileMaxRetriesExceeded(t *testing.T) {
 	cfg := &config.Config{
-		StatusListDir: "/tmp/test",
+		StatusListDir: testStatusListDir,
 	}
 
 	mockStorage := &MockStorage{
@@ -904,7 +908,7 @@ func TestWriteOrCreateFile_MaxRetriesExceeded(t *testing.T) {
 		storage: mockStorage,
 	}
 
-	err := rs.writeOrCreateFile("test.txt", []byte("test content"))
+	err := rs.writeOrCreateFile(testFileName, []byte(testContent))
 	if err == nil {
 		t.Error("Expected error after max retries, got nil")
 	}
@@ -919,9 +923,9 @@ func TestWriteOrCreateFile_MaxRetriesExceeded(t *testing.T) {
 }
 
 // TestWriteOrCreateFile_FileDeletedDuringOperation tests graceful handling when file is deleted
-func TestWriteOrCreateFile_FileDeletedDuringOperation(t *testing.T) {
+func TestWriteOrCreateFileFileDeletedDuringOperation(t *testing.T) {
 	cfg := &config.Config{
-		StatusListDir: "/tmp/test",
+		StatusListDir: testStatusListDir,
 	}
 
 	existsCalls := 0
@@ -941,7 +945,7 @@ func TestWriteOrCreateFile_FileDeletedDuringOperation(t *testing.T) {
 		storage: mockStorage,
 	}
 
-	err := rs.writeOrCreateFile("test.txt", []byte("test content"))
+	err := rs.writeOrCreateFile(testFileName, []byte(testContent))
 	if err != nil {
 		t.Errorf("Expected no error when file is deleted, got: %v", err)
 	}
@@ -952,9 +956,9 @@ func TestWriteOrCreateFile_FileDeletedDuringOperation(t *testing.T) {
 }
 
 // TestWriteOrCreateFile_GetVersionFailsWithNoSuchKey tests handling of file deletion during GetVersion
-func TestWriteOrCreateFile_GetVersionFailsWithNoSuchKey(t *testing.T) {
+func TestWriteOrCreateFileGetVersionFailsWithNoSuchKey(t *testing.T) {
 	cfg := &config.Config{
-		StatusListDir: "/tmp/test",
+		StatusListDir: testStatusListDir,
 	}
 
 	mockStorage := &MockStorage{
@@ -971,7 +975,7 @@ func TestWriteOrCreateFile_GetVersionFailsWithNoSuchKey(t *testing.T) {
 		storage: mockStorage,
 	}
 
-	err := rs.writeOrCreateFile("test.txt", []byte("test content"))
+	err := rs.writeOrCreateFile(testFileName, []byte(testContent))
 	if err != nil {
 		t.Errorf("Expected no error when file is deleted during GetVersion, got: %v", err)
 	}
@@ -993,9 +997,9 @@ func (e *noSuchKeyError) Unwrap() error {
 }
 
 // TestWriteOrCreateFile_NonVersionMismatchError tests that other errors are not retried
-func TestWriteOrCreateFile_NonVersionMismatchError(t *testing.T) {
+func TestWriteOrCreateFileNonVersionMismatchError(t *testing.T) {
 	cfg := &config.Config{
-		StatusListDir: "/tmp/test",
+		StatusListDir: testStatusListDir,
 	}
 
 	mockStorage := &MockStorage{
@@ -1015,7 +1019,7 @@ func TestWriteOrCreateFile_NonVersionMismatchError(t *testing.T) {
 		storage: mockStorage,
 	}
 
-	err := rs.writeOrCreateFile("test.txt", []byte("test content"))
+	err := rs.writeOrCreateFile(testFileName, []byte(testContent))
 	if err == nil {
 		t.Error("Expected error, got nil")
 	}
@@ -1039,9 +1043,9 @@ func (e *otherError) Error() string {
 }
 
 // TestProcessListFile_FileNotFound tests graceful handling of missing files
-func TestProcessListFile_FileNotFound(t *testing.T) {
+func TestProcessListFileFileNotFound(t *testing.T) {
 	cfg := &config.Config{
-		StatusListDir: "/tmp/test",
+		StatusListDir: testStatusListDir,
 	}
 
 	mockStorage := &MockStorage{
@@ -1064,7 +1068,7 @@ func TestProcessListFile_FileNotFound(t *testing.T) {
 }
 
 // TestRenewTokenStatusList_DirectoryDeletedDuringWrite tests graceful handling when directory is deleted
-func TestRenewTokenStatusList_DirectoryDeletedDuringWrite(t *testing.T) {
+func TestRenewTokenStatusListDirectoryDeletedDuringWrite(t *testing.T) {
 	tempDir, _, cfg, stor := setupTestEnvironment(t)
 	defer os.RemoveAll(tempDir)
 
@@ -1095,7 +1099,7 @@ func TestRenewTokenStatusList_DirectoryDeletedDuringWrite(t *testing.T) {
 }
 
 // TestRenewIdentifierList_DirectoryDeletedDuringWrite tests graceful handling when directory is deleted
-func TestRenewIdentifierList_DirectoryDeletedDuringWrite(t *testing.T) {
+func TestRenewIdentifierListDirectoryDeletedDuringWrite(t *testing.T) {
 	tempDir, _, cfg, stor := setupTestEnvironment(t)
 	defer os.RemoveAll(tempDir)
 

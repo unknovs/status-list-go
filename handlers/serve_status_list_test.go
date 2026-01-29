@@ -30,6 +30,8 @@ import (
 	"github.com/unknovs/status-list-go/services/storage"
 )
 
+const expectedErrorCodeMsg = "Expected error code %s, got %s"
+
 func setupTestConfig(t *testing.T) (*config.Config, string, storage.Storage) {
 	tempDir, err := os.MkdirTemp("", "serve_status_list_test")
 	if err != nil {
@@ -255,7 +257,7 @@ func TestServeStatusList(t *testing.T) {
 					t.Errorf("Failed to unmarshal error response: %v", err)
 				}
 				if errorResponse.Error.Code != tt.expectedError {
-					t.Errorf("Expected error code %s, got %s", tt.expectedError, errorResponse.Error.Code)
+					t.Errorf(expectedErrorCodeMsg, tt.expectedError, errorResponse.Error.Code)
 				}
 			}
 
@@ -355,7 +357,7 @@ func TestServeStatusListFileSystemErrors(t *testing.T) {
 			t.Errorf("Failed to unmarshal error response: %v", err)
 		}
 		if errorResponse.Error.Code != errors.ErrListNotFound {
-			t.Errorf("Expected error code %s, got %s", errors.ErrListNotFound, errorResponse.Error.Code)
+			t.Errorf(expectedErrorCodeMsg, errors.ErrListNotFound, errorResponse.Error.Code)
 		}
 	})
 }
@@ -418,7 +420,7 @@ func TestServeStatusListPathParsing(t *testing.T) {
 					t.Errorf("Failed to unmarshal error response: %v", err)
 				}
 				if errorResponse.Error.Code != tt.expectedErr {
-					t.Errorf("Expected error code %s, got %s", tt.expectedErr, errorResponse.Error.Code)
+					t.Errorf(expectedErrorCodeMsg, tt.expectedErr, errorResponse.Error.Code)
 				}
 			}
 		})
@@ -542,7 +544,7 @@ func TestServeStatusListMissingFiles(t *testing.T) {
 			t.Errorf("Failed to unmarshal error response: %v", err)
 		}
 		if errorResponse.Error.Code != errors.ErrListNotFound {
-			t.Errorf("Expected error code %s, got %s", errors.ErrListNotFound, errorResponse.Error.Code)
+			t.Errorf(expectedErrorCodeMsg, errors.ErrListNotFound, errorResponse.Error.Code)
 		}
 	})
 
