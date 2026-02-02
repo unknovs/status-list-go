@@ -82,6 +82,13 @@ func (lm *ListManager) NewList(country, doctype string) {
 func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, doctype string) error {
 	rand := statusListData.Rand
 
+	// Generate URIs before saving so they're included in the JSON from the start
+	statusListURI, identifierListURI := lm.buildURIs(country, doctype, rand)
+	
+	// Update URIs in the status list data before marshaling
+	statusListData.StatusListURI = statusListURI
+	statusListData.IdentifierListURI = identifierListURI
+
 	// Copy data and set metadata
 	statusListCopy := *statusListData
 	statusListCopy.Country = country
@@ -92,22 +99,15 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 		return err
 	}
 
-	// Save JSON files
+	// Save JSON files (now includes URIs)
 	if err := lm.saveJSONFiles(country, doctype, rand, jsonData); err != nil {
 		return err
 	}
-
-	// Generate URIs
-	statusListURI, identifierListURI := lm.buildURIs(country, doctype, rand)
 
 	// Generate and save all format files
 	if err := lm.saveFormatFiles(statusListData, country, doctype, rand, statusListURI, identifierListURI); err != nil {
 		return err
 	}
-
-	// Update URIs in the status list data
-	statusListData.StatusListURI = statusListURI
-	statusListData.IdentifierListURI = identifierListURI
 
 	return nil
 }
