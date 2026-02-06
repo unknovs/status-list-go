@@ -84,7 +84,7 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 
 	// Generate URIs before saving so they're included in the JSON from the start
 	statusListURI, identifierListURI := lm.buildURIs(country, doctype, rand)
-	
+
 	// Update URIs in the status list data before marshaling
 	statusListData.StatusListURI = statusListURI
 	statusListData.IdentifierListURI = identifierListURI
@@ -149,8 +149,9 @@ func (lm *ListManager) saveJSONFile(path string, jsonData []byte, fileType strin
 
 // buildURIs constructs the status list and identifier list URIs
 func (lm *ListManager) buildURIs(country, doctype, rand string) (string, string) {
-	statusListURI := lm.config.ServiceURL + fmt.Sprintf("token_status_list/%s/%s/%s", country, doctype, rand)
-	identifierListURI := lm.config.ServiceURL + fmt.Sprintf("identifier_list/%s/%s/%s", country, doctype, rand)
+	baseURL := strings.TrimSuffix(lm.config.ServiceURL, "/") + "/"
+	statusListURI := baseURL + fmt.Sprintf("token_status_list/%s/%s/%s", country, doctype, rand)
+	identifierListURI := baseURL + fmt.Sprintf("identifier_list/%s/%s/%s", country, doctype, rand)
 	return statusListURI, identifierListURI
 }
 
