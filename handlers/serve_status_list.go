@@ -28,6 +28,7 @@ import (
 
 const (
 	StatusListJWTContentType = "application/statuslist+jwt"
+	StatusListCWTContentType = "application/statuslist+cwt"
 )
 
 // ServeStatusList serves the status list JWT file for a given country, doctype, and id (rand)
@@ -63,18 +64,21 @@ func (h *StatusListHandler) ServeStatusList(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Content negotiation - support both JWT and CWT
+	// Parse Accept header to handle multiple media types (e.g., "application/statuslist+jwt,application/json")
 	accept := r.Header.Get("Accept")
 	if accept == "" || accept == "*/*" {
 		accept = StatusListJWTContentType // Default to JWT
 	}
 
 	var contentType, fileName string
-	switch accept {
+	acceptedType := parseAcceptHeader(accept)
+
+	switch acceptedType {
 	case StatusListJWTContentType:
 		contentType = StatusListJWTContentType
 		fileName = "token_status_list.jwt"
-	case "application/statuslist+cwt":
-		contentType = "application/statuslist+cwt"
+	case StatusListCWTContentType:
+		contentType = StatusListCWTContentType
 		fileName = "token_status_list.cwt"
 	default:
 		errors.WriteError(w, http.StatusNotAcceptable, errors.ErrInvalidAccept)
@@ -109,6 +113,37 @@ func (h *StatusListHandler) ServeStatusList(w http.ResponseWriter, r *http.Reque
 		// Log error but don't send response as headers are already written
 		return
 	}
+}
+
+// parseAcceptHeader extracts the first supported media type from Accept header
+// Handles comma-separated values like "application/statuslist+jwt,application/json,text/html"
+func parseAcceptHeader(accept string) string {
+	// Split by comma to handle multiple media types
+	mediaTypes := strings.Split(accept, ",")
+
+	for _, mediaType := range mediaTypes {
+		// Trim whitespace and remove quality values (e.g., ";q=0.9")
+		mt := strings.TrimSpace(mediaType)
+		if idx := strings.Index(mt, ";"); idx != -1 {
+			mt = mt[:idx]
+		}
+		mt = strings.TrimSpace(mt)
+
+		// Check if this is a supported media type (prefer JWT over CWT)
+		if mt == StatusListJWTContentType {
+			return StatusListJWTContentType
+		}
+		if mt == StatusListCWTContentType {
+			return StatusListCWTContentType
+		}
+		// Wildcards
+		if mt == "*/*" || mt == "application/*" {
+			return StatusListJWTContentType // Default to JWT
+		}
+	}
+
+	// No supported media type found
+	return ""
 }
 
 func normalizeStatusListPath(rawPath, basePath string) (string, bool) {
