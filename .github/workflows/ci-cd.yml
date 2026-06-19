@@ -8,7 +8,7 @@ on:
     branches: [ main, develop ]
 
 env:
-  GO_VERSION: '1.25'
+  GO_VERSION: '1.26'
   REGISTRY: docker.io
   IMAGE_NAME: status-list-go
 
@@ -17,15 +17,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Cache Go modules
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
@@ -43,7 +43,7 @@ jobs:
 
       - name: Setup Trivy
         if: github.event_name == 'pull_request'
-        uses: aquasecurity/setup-trivy@v0.2.0
+        uses: aquasecurity/setup-trivy@v0.2.6
 
       - name: Run Trivy filesystem scan
         if: github.event_name == 'pull_request'
@@ -78,9 +78,9 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: github.event_name != 'pull_request'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
-          file: ./coverage.out
+          files: ./coverage.out
           flags: unittests
           name: codecov-umbrella
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -94,14 +94,14 @@ jobs:
       
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to Docker Hub
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -118,7 +118,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ steps.image-name.outputs.name }}
           tags: |
@@ -131,7 +131,7 @@ jobs:
 
       - name: Build Docker image (PRs)
         if: github.event_name == 'pull_request'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -154,7 +154,7 @@ jobs:
 
       - name: Build and push Docker image (pushes)
         if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -183,7 +183,7 @@ jobs:
       security-events: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download Docker image tar (PRs)
         if: github.event_name == 'pull_request'
@@ -199,13 +199,20 @@ jobs:
             echo "image=$(pwd)/status-list-go.tar" >> $GITHUB_OUTPUT
             echo "local=true" >> $GITHUB_OUTPUT
           else
-            echo "image=${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_OUTPUT
+            REF_NAME="${{ github.ref_name }}"
+            # Strip leading 'v' from semver tags (v1.2.3 -> 1.2.3) to match docker/metadata-action output
+            if [[ "$REF_NAME" =~ ^v[0-9] ]]; then
+              TAG="${REF_NAME#v}"
+            else
+              TAG="$REF_NAME"
+            fi
+            echo "image=${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:$TAG" >> $GITHUB_OUTPUT
             echo "local=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Login to Docker Hub for scanning
         if: steps.scan-target.outputs.local == 'false'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -244,7 +251,7 @@ jobs:
           fi
 
       - name: Setup Trivy
-        uses: aquasecurity/setup-trivy@v0.2.0
+        uses: aquasecurity/setup-trivy@v0.2.6
 
       - name: Run Trivy vulnerability scanner
         if: env.IMAGE_EXISTS == 'true'

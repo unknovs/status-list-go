@@ -49,7 +49,8 @@ func NewRenewalService(cfg *config.Config, stor storage.Storage) *RenewalService
 
 // RenewLists renews all status lists that haven't expired
 func (rs *RenewalService) RenewLists() error {
-	log.Println("Starting list renewal process")
+	hostname, _ := os.Hostname()
+	log.Printf("Starting list renewal process on pod %s", hostname)
 
 	// Check if the status list directory exists
 	if _, err := os.Stat(rs.config.StatusListDir); os.IsNotExist(err) {
