@@ -2,14 +2,17 @@ package cleanup
 
 import (
 	"encoding/json"
-	"errors"
+	stdErrors "errors"
 	"fmt"
 	"log"
+	"os"
 	"path"
 	"strings"
 	"time"
 
 	"github.com/unknovs/status-list-go/config"
+	"github.com/unknovs/status-list-go/debuglog"
+	"github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/models"
 	"github.com/unknovs/status-list-go/services/storage"
 )
@@ -31,13 +34,16 @@ func NewService(cfg *config.Config, stor storage.Storage) *Service {
 
 // RunOnce executes the cleanup workflow immediately.
 func (s *Service) RunOnce() {
+	hostname, _ := os.Hostname()
+	debuglog.Printf("Cleanup starting on pod %s", hostname)
+
 	count, err := s.cleanupExpiredLists()
 	if err != nil {
-		log.Printf("Status list cleanup finished with errors; removed %d expired lists: %v", count, err)
+		log.Printf("Status list cleanup finished with errors on pod %s; removed %d expired lists: %v", hostname, count, err)
 		return
 	}
 
-	log.Printf("Status list cleanup completed; %d expired lists deleted", count)
+	log.Printf("Status list cleanup completed on pod %s; %d expired lists deleted", hostname, count)
 }
 
 // Start launches the background scheduler that performs cleanup daily at the configured time.
@@ -87,6 +93,11 @@ func (s *Service) cleanupExpiredLists() (int, error) {
 
 		statusList, loadErr := s.loadStatusList(filePath)
 		if loadErr != nil {
+			// Another pod may have already deleted this file ā€” treat as non-error.
+			if stdErrors.Is(loadErr, errors.ErrNotFound) {
+				debuglog.Printf("Cleanup: %s already removed (concurrent cleanup?), skipping", filePath)
+				continue
+			}
 			errs = append(errs, loadErr)
 			continue
 		}
@@ -116,7 +127,7 @@ func (s *Service) cleanupExpiredLists() (int, error) {
 		deleted++
 	}
 
-	return deleted, errors.Join(errs...)
+	return deleted, stdErrors.Join(errs...)
 }
 
 func (s *Service) loadStatusList(path string) (*models.StatusListData, error) {
@@ -177,3 +188,4 @@ func nextRun(now time.Time, hour, minute int) time.Time {
 	}
 	return next
 }
+

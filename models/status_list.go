@@ -172,6 +172,11 @@ func (a *Allocator) Take() (int, error) {
 	return index, nil
 }
 
+// AvailableCount returns the number of unallocated indices remaining.
+func (a *Allocator) AvailableCount() int {
+	return len(a.indices) - a.usedCount
+}
+
 // Creates a new issuer status list
 func NewIssuerStatusList(bits, size int, strategy string) *IssuerStatusList {
 	return &IssuerStatusList{

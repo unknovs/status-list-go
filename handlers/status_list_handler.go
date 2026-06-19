@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/unknovs/status-list-go/config"
+	"github.com/unknovs/status-list-go/debuglog"
 	"github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/services"
 	"github.com/unknovs/status-list-go/services/storage"
@@ -66,6 +67,9 @@ func NewStatusListHandler(cfg *config.Config, stor storage.Storage) *StatusListH
 // @Failure 401 {object} map[string]string
 // @Router /token_status_list/take [post]
 func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	debuglog.Printf("TakeIndex: request received from %s", r.RemoteAddr)
+
 	if r.Method != http.MethodPost {
 		errors.WriteError(w, http.StatusMethodNotAllowed, errors.ErrBadRequest)
 		return
@@ -88,7 +92,7 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 	// Validate doctype
 	doctype := r.FormValue("doctype")
 	if !h.config.ValidateDoctype(doctype) {
-		log.Printf("Invalid document type provided")
+		log.Printf("Invalid document type provided: %q", doctype)
 		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidDoctype)
 		return
 	}
@@ -96,7 +100,7 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 	// Validate country
 	country := r.FormValue("country")
 	if !h.config.ValidateCountry(country) {
-		log.Printf("Invalid country provided")
+		log.Printf("Invalid country provided: %q", country)
 		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidCountry)
 		return
 	}
@@ -109,15 +113,17 @@ func (h *StatusListHandler) TakeIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	debuglog.Printf("TakeIndex: doctype=%s country=%s expiry=%s", doctype, country, expiryDate)
+
 	// Generate status list info
 	statusInfo, err := h.listManager.GenerateStatusListInfo(country, doctype, expiryDate)
 	if err != nil {
-		log.Printf("Failed to generate status info: %v", err)
+		debuglog.Printf("TakeIndex: GenerateStatusListInfo failed after %s: %v", time.Since(start), err)
 		errors.WriteError(w, http.StatusInternalServerError, errors.ErrInternalServer)
 		return
 	}
 
-	log.Printf("Status Info: %+v", statusInfo)
+	debuglog.Printf("TakeIndex: completed in %s ā€” Status Info: %+v", time.Since(start), statusInfo)
 	h.writeJSON(w, http.StatusOK, statusInfo)
 }
 
@@ -316,3 +322,4 @@ func (h *StatusListHandler) validateExpiryDate(expiryDate string) error {
 
 	return nil
 }
+
