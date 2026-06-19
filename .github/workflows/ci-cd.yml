@@ -43,7 +43,7 @@ jobs:
 
       - name: Setup Trivy
         if: github.event_name == 'pull_request'
-        uses: aquasecurity/setup-trivy@v0.2.0
+        uses: aquasecurity/setup-trivy@v0.2.6
 
       - name: Run Trivy filesystem scan
         if: github.event_name == 'pull_request'
@@ -78,7 +78,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: github.event_name != 'pull_request'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           file: ./coverage.out
           flags: unittests
@@ -97,11 +97,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to Docker Hub
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -118,7 +118,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ steps.image-name.outputs.name }}
           tags: |
@@ -131,7 +131,7 @@ jobs:
 
       - name: Build Docker image (PRs)
         if: github.event_name == 'pull_request'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -154,7 +154,7 @@ jobs:
 
       - name: Build and push Docker image (pushes)
         if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -244,7 +244,7 @@ jobs:
           fi
 
       - name: Setup Trivy
-        uses: aquasecurity/setup-trivy@v0.2.0
+        uses: aquasecurity/setup-trivy@v0.2.6
 
       - name: Run Trivy vulnerability scanner
         if: env.IMAGE_EXISTS == 'true'
