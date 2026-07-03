@@ -18,12 +18,14 @@ package services
 
 import (
 	"encoding/json"
+	stdErrors "errors"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/unknovs/status-list-go/config"
+	localerrors "github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/models"
 )
 
@@ -369,6 +371,58 @@ func TestLoadList(t *testing.T) {
 	}
 }
 
+// TestLoadListRejectsPathTraversal ensures an attacker-supplied URI cannot use
+// ".." segments to escape the storage root when the list path is derived.
+func TestLoadListRejectsPathTraversal(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 100,
+		CountryCode:         "DE",
+	}
+	lm := NewListManager(cfg, NewMockStorage())
+
+	traversalURIs := []string{
+		"http://localhost:8081/token_status_list/../../../../etc",
+		"http://localhost:8081/../../../../etc/secret",
+		"http://localhost:8081/token_status_list/DE/../../../../../root",
+	}
+
+	for _, uri := range traversalURIs {
+		t.Run(uri, func(t *testing.T) {
+			_, err := lm.LoadList(uri)
+			if err == nil {
+				t.Fatalf("LoadList(%q) should reject path traversal, got nil error", uri)
+			}
+
+			if !stdErrors.Is(err, localerrors.ErrPathTraversal) {
+				t.Fatalf("LoadList(%q) error = %v, want it to wrap ErrPathTraversal", uri, err)
+			}
+		})
+	}
+}
+
+// TestIsContainedPath covers the traversal-containment helper directly.
+func TestIsContainedPath(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		{"token_status_list/DE/mDL/abc/full_list.json", true},
+		{"identifier_list/DE/mDL/abc/full_list.json", true},
+		{"../full_list.json", false},
+		{"../../etc/full_list.json", false},
+		{"token_status_list/../../../etc/full_list.json", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := isContainedPath(tt.path); got != tt.expected {
+				t.Errorf("isContainedPath(%q) = %v, expected %v", tt.path, got, tt.expected)
+			}
+		})
+	}
+}
+
 // TestTakeIndexList tests taking indices from a status list
 func TestTakeIndexList(t *testing.T) {
 	cfg := &config.Config{
@@ -553,6 +607,104 @@ func TestSetStatus(t *testing.T) {
 
 	if lm.statusList[country][doctype].IdentifierList["10"] != 1 {
 		t.Error("In-memory identifier list should be updated")
+	}
+}
+
+// conflictInjectingStorage wraps MockStorage and forces the next N versioned writes to
+// fail with ErrVersionMismatch, simulating a concurrent revocation that won the race.
+type conflictInjectingStorage struct {
+	*MockStorage
+	writeFailures int
+}
+
+func (c *conflictInjectingStorage) Write(path string, content []byte, version int) error {
+	if c.writeFailures > 0 {
+		c.writeFailures--
+		return fmt.Errorf("failed to update JSON: %w", localerrors.ErrVersionMismatch)
+	}
+
+	return c.MockStorage.Write(path, content, version)
+}
+
+// TestSetStatusRetriesOnVersionMismatch verifies that a version conflict during persist is
+// retried with a fresh load instead of being silently dropped (finding 5.1).
+func TestSetStatusRetriesOnVersionMismatch(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 100,
+		CountryCode:         "DE",
+	}
+	stor := &conflictInjectingStorage{MockStorage: NewMockStorage()}
+	lm := NewListManager(cfg, stor)
+
+	country := "DE"
+	doctype := "mDL"
+	lm.NewList(country, doctype)
+
+	statusData := lm.statusList[country][doctype]
+	listID := statusData.Rand
+
+	if err := lm.DumpList(statusData, country, doctype); err != nil {
+		t.Fatalf("DumpList failed: %v", err)
+	}
+
+	uri := fmt.Sprintf("http://localhost:8081/token_status_list/%s/%s/%s", country, doctype, listID)
+
+	// Force the first persisted write to conflict; SetStatus must reload and retry.
+	stor.writeFailures = 1
+
+	if err := lm.SetStatus(uri, country, doctype, listID, 10, 1); err != nil {
+		t.Fatalf("SetStatus should retry past a version conflict, got: %v", err)
+	}
+
+	if stor.writeFailures != 0 {
+		t.Fatalf("expected injected conflict to be consumed, %d remaining", stor.writeFailures)
+	}
+
+	status, err := lm.GetStatusFromURI(uri, 10)
+	if err != nil {
+		t.Fatalf("GetStatusFromURI failed: %v", err)
+	}
+
+	if status != 1 {
+		t.Errorf("expected status 1 after retry, got %d", status)
+	}
+}
+
+// TestSetStatusFailsAfterPersistentConflict verifies that a conflict on every attempt
+// surfaces an error rather than looping forever or reporting false success (finding 5.1).
+func TestSetStatusFailsAfterPersistentConflict(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 100,
+		CountryCode:         "DE",
+	}
+	stor := &conflictInjectingStorage{MockStorage: NewMockStorage()}
+	lm := NewListManager(cfg, stor)
+
+	country := "DE"
+	doctype := "mDL"
+	lm.NewList(country, doctype)
+
+	statusData := lm.statusList[country][doctype]
+	listID := statusData.Rand
+
+	if err := lm.DumpList(statusData, country, doctype); err != nil {
+		t.Fatalf("DumpList failed: %v", err)
+	}
+
+	uri := fmt.Sprintf("http://localhost:8081/token_status_list/%s/%s/%s", country, doctype, listID)
+
+	// Conflict on every attempt (more than maxAttempts).
+	stor.writeFailures = 100
+
+	err := lm.SetStatus(uri, country, doctype, listID, 10, 1)
+	if err == nil {
+		t.Fatal("expected SetStatus to fail after exhausting retries")
+	}
+
+	if !stdErrors.Is(err, localerrors.ErrVersionMismatch) {
+		t.Errorf("expected wrapped ErrVersionMismatch, got: %v", err)
 	}
 }
 

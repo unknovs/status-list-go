@@ -307,6 +307,11 @@ func TestGetIndex(t *testing.T) {
 			path:           "/token_status_list/get?" + url.Values{"uri": {"http://localhost:8080/token_status_list/LV/PID/missing"}, "idx": {"0"}}.Encode(),
 			expectedStatus: fasthttp.StatusNotFound,
 		},
+		{
+			name:           "path traversal uri rejected as invalid",
+			path:           "/token_status_list/get?" + url.Values{"uri": {"http://localhost:8080/token_status_list/../../../../etc/secret"}, "idx": {"0"}}.Encode(),
+			expectedStatus: fasthttp.StatusBadRequest,
+		},
 	}
 
 	for _, tt := range tests {

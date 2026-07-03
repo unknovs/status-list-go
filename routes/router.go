@@ -17,6 +17,7 @@ limitations under the License.
 package routes
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -319,9 +320,14 @@ func resolveStaticDir() string {
 
 // apiKeyMiddleware rejects requests without a valid X-Api-Key header.
 func apiKeyMiddleware(apiKey string) azugo.RequestHandlerFunc {
+	expected := []byte(apiKey)
+
 	return func(next azugo.RequestHandler) azugo.RequestHandler {
 		return func(ctx *azugo.Context) {
-			if ctx.Header.Get(handlers.APIKeyHeader) != apiKey {
+			provided := []byte(ctx.Header.Get(handlers.APIKeyHeader))
+			// Constant-time comparison avoids a timing side-channel; a mismatched
+			// length (including an empty header) yields 0, so no header never passes.
+			if subtle.ConstantTimeCompare(provided, expected) != 1 {
 				ctx.Error(pkerrors.HTTP("request", "unauthorized"))
 				return
 			}

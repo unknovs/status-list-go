@@ -17,6 +17,7 @@ limitations under the License.
 package handlers
 
 import (
+	stdErrors "errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
 
 	"github.com/unknovs/status-list-go/config"
+	localerrors "github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/services"
 	"github.com/unknovs/status-list-go/services/storage"
 )
@@ -120,6 +122,12 @@ func (h *StatusListHandler) GetIndex(ctx *azugo.Context) {
 
 	status, err := h.listManager.GetStatusFromURI(decodedURI, index)
 	if err != nil {
+		if stdErrors.Is(err, localerrors.ErrPathTraversal) {
+			ctx.Error(pkerrors.NewProblem("err:statusList:invalid",
+				pkerrors.WithPublicDetail("invalid uri")))
+			return
+		}
+
 		ctx.Error(pkerrors.HTTP("statusList", "notFound"))
 		return
 	}

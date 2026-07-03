@@ -18,6 +18,7 @@ package services
 
 import (
 	"encoding/json"
+	stdErrors "errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	"github.com/unknovs/status-list-go/config"
+	localerrors "github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/models"
 	"github.com/unknovs/status-list-go/services/storage"
 
@@ -273,6 +275,15 @@ func (lm *ListManager) LoadList(uri string) (*models.StatusListData, error) {
 
 	folderPath := filepath.Join(relativePath, FullListJSONFile)
 
+	// Guard against path traversal: the URI is attacker-controlled (e.g. the
+	// unauthenticated GET endpoint) and url.Parse does not resolve ".." segments.
+	// Reject any path that escapes the storage root before handing it to the
+	// storage backend, which joins it under the configured status list directory.
+	// The handler maps this sentinel to a client-safe problem via errors.Is.
+	if !isContainedPath(folderPath) {
+		return nil, fmt.Errorf("%w: %q escapes storage root", localerrors.ErrPathTraversal, uri)
+	}
+
 	jsonData, err := lm.storage.Read(folderPath)
 	if err != nil {
 		return nil, err
@@ -284,6 +295,18 @@ func (lm *ListManager) LoadList(uri string) (*models.StatusListData, error) {
 	}
 
 	return &statusListData, nil
+}
+
+// isContainedPath reports whether path, once cleaned, stays within the storage
+// root. It rejects absolute paths and any path that traverses upward via "..",
+// which prevents an attacker-supplied URI from escaping the status list directory.
+func isContainedPath(path string) bool {
+	cleaned := filepath.Clean(path)
+	if filepath.IsAbs(cleaned) {
+		return false
+	}
+
+	return cleaned != ".." && !strings.HasPrefix(cleaned, ".."+string(filepath.Separator))
 }
 
 // TakeIndexList takes a new index from the list.
@@ -399,33 +422,53 @@ func (lm *ListManager) GetStatusFromURI(uri string, index int) (int, error) {
 	return 0, fmt.Errorf("unknown URI type")
 }
 
-// SetStatus updates the status at a given index
+// SetStatus updates the status at a given index.
+// DumpList persists via versioned (optimistic-concurrency) writes, so two concurrent
+// revocations of the same list can race: both load version N, and the loser's DumpList
+// fails with ErrVersionMismatch. Retry with a fresh LoadList so the second revocation is
+// re-applied on top of the winner's write instead of being silently dropped.
 func (lm *ListManager) SetStatus(uri, country, doctype, listID string, index, status int) error {
-	tempList, err := lm.LoadList(uri)
-	if err != nil {
-		return err
-	}
+	const maxAttempts = 3
 
-	// Update the status
-	tempList.TokenStatusList.StatusList.Set(index, status)
-	tempList.IdentifierList[fmt.Sprintf("%d", index)] = status
+	var lastErr error
 
-	// Update the in-memory status list if it matches
-	lm.mutex.Lock()
-	if lm.statusList[country] != nil && lm.statusList[country][doctype] != nil &&
-		lm.statusList[country][doctype].Rand == listID {
-		lm.statusList[country][doctype].TokenStatusList.StatusList.Set(index, status)
-
-		if lm.statusList[country][doctype].IdentifierList == nil {
-			lm.statusList[country][doctype].IdentifierList = make(map[string]int)
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		tempList, err := lm.LoadList(uri)
+		if err != nil {
+			return err
 		}
 
-		lm.statusList[country][doctype].IdentifierList[fmt.Sprintf("%d", index)] = status
-	}
-	lm.mutex.Unlock()
+		// Update the status
+		tempList.TokenStatusList.StatusList.Set(index, status)
+		tempList.IdentifierList[fmt.Sprintf("%d", index)] = status
 
-	// Save the updated list
-	return lm.DumpList(tempList, country, doctype)
+		// Update the in-memory status list if it matches
+		lm.mutex.Lock()
+		if lm.statusList[country] != nil && lm.statusList[country][doctype] != nil &&
+			lm.statusList[country][doctype].Rand == listID {
+			lm.statusList[country][doctype].TokenStatusList.StatusList.Set(index, status)
+
+			if lm.statusList[country][doctype].IdentifierList == nil {
+				lm.statusList[country][doctype].IdentifierList = make(map[string]int)
+			}
+
+			lm.statusList[country][doctype].IdentifierList[fmt.Sprintf("%d", index)] = status
+		}
+		lm.mutex.Unlock()
+
+		// Save the updated list
+		lastErr = lm.DumpList(tempList, country, doctype)
+		if lastErr == nil {
+			return nil
+		}
+
+		// Only a version conflict is retryable; anything else is terminal.
+		if !stdErrors.Is(lastErr, localerrors.ErrVersionMismatch) {
+			return lastErr
+		}
+	}
+
+	return fmt.Errorf("failed to persist status update after %d attempts: %w", maxAttempts, lastErr)
 }
 
 // generateJWTFormat generates JWT format

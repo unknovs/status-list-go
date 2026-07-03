@@ -23,7 +23,7 @@ node_modules
 !/openapi/public/*/index.html
 
 .idea
-.github
+
 .vscode
 .cert
 /logs

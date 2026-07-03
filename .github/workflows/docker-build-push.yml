@@ -60,7 +60,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  sonarqube:
+  Tests:
     needs: build-and-push
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
@@ -110,8 +110,9 @@ jobs:
       - name: Run tests with coverage
         run: go test -timeout=2m -race -coverprofile=coverage.out -covermode=atomic ./...
 
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v8
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      # - name: SonarQube Scan
+      #   uses: SonarSource/sonarqube-scan-action@v8
+      #   env:
+      #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 

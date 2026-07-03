@@ -20,8 +20,48 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	"azugo.io/core/validation"
 )
+
+// TestValidateAPIKey ensures internal mode refuses to start with a missing or
+// default API key, since the write endpoints are guarded only by that key.
+func TestValidateAPIKey(t *testing.T) {
+	const apiKeyErr = "api_key must be set"
+
+	tests := []struct {
+		name        string
+		serviceMode string
+		apiKey      string
+		wantAPIErr  bool
+	}{
+		{name: "internal default key rejected", serviceMode: "internal", apiKey: "test", wantAPIErr: true},
+		{name: "internal empty key rejected", serviceMode: "internal", apiKey: "", wantAPIErr: true},
+		{name: "internal whitespace key rejected", serviceMode: "internal", apiKey: "   ", wantAPIErr: true},
+		{name: "internal real key accepted", serviceMode: "internal", apiKey: "a-strong-secret", wantAPIErr: false},
+		{name: "public empty key allowed", serviceMode: "public", apiKey: "", wantAPIErr: false},
+		{name: "unset mode defaults to internal and is enforced", serviceMode: "", apiKey: "test", wantAPIErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				APIKey:      tt.apiKey,
+				ServiceMode: tt.serviceMode,
+				CountryCode: "LV",
+			}
+
+			err := cfg.Validate(validation.New())
+
+			gotAPIErr := err != nil && strings.Contains(err.Error(), apiKeyErr)
+			if gotAPIErr != tt.wantAPIErr {
+				t.Fatalf("Validate() api_key error = %v (err=%v), want api_key error = %v", gotAPIErr, err, tt.wantAPIErr)
+			}
+		})
+	}
+}
 
 func TestNormalizeBasePath(t *testing.T) {
 	tests := []struct {
