@@ -29,4 +29,8 @@ var (
 
 	// ErrVersionMismatch indicates a concurrent modification conflict
 	ErrVersionMismatch = errors.New("version mismatch")
+
+	// ErrPathTraversal indicates a derived storage path that would escape the
+	// storage root (path traversal), e.g. from an attacker-supplied URI.
+	ErrPathTraversal = errors.New("path traversal")
 )

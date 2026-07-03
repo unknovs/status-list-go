@@ -17,6 +17,7 @@ limitations under the License.
 package config
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -132,6 +133,15 @@ func (c *Configuration) Validate(valid *validation.Validate) error {
 	c.ServiceMode = strings.ToLower(strings.TrimSpace(c.ServiceMode))
 	if c.ServiceMode != "public" && c.ServiceMode != "internal" {
 		c.ServiceMode = "internal"
+	}
+
+	// In internal mode the write endpoints (/take, /set) are exposed and protected
+	// only by the API key. Refuse to start with a missing or well-known default key
+	// so the service never ships writable by anyone who knows the default.
+	if c.ServiceMode == "internal" {
+		if strings.TrimSpace(c.APIKey) == "" || c.APIKey == "test" {
+			return fmt.Errorf("api_key must be set to a non-default value in internal mode (set the API_KEY environment variable)")
+		}
 	}
 
 	c.CleanupHour = normalizeHour(c.CleanupHour)

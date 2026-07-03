@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/unknovs/status-list-go/config"
+	localerrors "github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/models"
 	"github.com/unknovs/status-list-go/services/storage"
 
@@ -273,6 +274,15 @@ func (lm *ListManager) LoadList(uri string) (*models.StatusListData, error) {
 
 	folderPath := filepath.Join(relativePath, FullListJSONFile)
 
+	// Guard against path traversal: the URI is attacker-controlled (e.g. the
+	// unauthenticated GET endpoint) and url.Parse does not resolve ".." segments.
+	// Reject any path that escapes the storage root before handing it to the
+	// storage backend, which joins it under the configured status list directory.
+	// The handler maps this sentinel to a client-safe problem via errors.Is.
+	if !isContainedPath(folderPath) {
+		return nil, fmt.Errorf("%w: %q escapes storage root", localerrors.ErrPathTraversal, uri)
+	}
+
 	jsonData, err := lm.storage.Read(folderPath)
 	if err != nil {
 		return nil, err
@@ -284,6 +294,18 @@ func (lm *ListManager) LoadList(uri string) (*models.StatusListData, error) {
 	}
 
 	return &statusListData, nil
+}
+
+// isContainedPath reports whether path, once cleaned, stays within the storage
+// root. It rejects absolute paths and any path that traverses upward via "..",
+// which prevents an attacker-supplied URI from escaping the status list directory.
+func isContainedPath(path string) bool {
+	cleaned := filepath.Clean(path)
+	if filepath.IsAbs(cleaned) {
+		return false
+	}
+
+	return cleaned != ".." && !strings.HasPrefix(cleaned, ".."+string(filepath.Separator))
 }
 
 // TakeIndexList takes a new index from the list.

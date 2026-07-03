@@ -18,12 +18,14 @@ package services
 
 import (
 	"encoding/json"
+	stdErrors "errors"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/unknovs/status-list-go/config"
+	localerrors "github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/models"
 )
 
@@ -366,6 +368,58 @@ func TestLoadList(t *testing.T) {
 
 	if loadedData.Doctype != doctype {
 		t.Errorf("Expected doctype %s, got %s", doctype, loadedData.Doctype)
+	}
+}
+
+// TestLoadListRejectsPathTraversal ensures an attacker-supplied URI cannot use
+// ".." segments to escape the storage root when the list path is derived.
+func TestLoadListRejectsPathTraversal(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 100,
+		CountryCode:         "DE",
+	}
+	lm := NewListManager(cfg, NewMockStorage())
+
+	traversalURIs := []string{
+		"http://localhost:8081/token_status_list/../../../../etc",
+		"http://localhost:8081/../../../../etc/secret",
+		"http://localhost:8081/token_status_list/DE/../../../../../root",
+	}
+
+	for _, uri := range traversalURIs {
+		t.Run(uri, func(t *testing.T) {
+			_, err := lm.LoadList(uri)
+			if err == nil {
+				t.Fatalf("LoadList(%q) should reject path traversal, got nil error", uri)
+			}
+
+			if !stdErrors.Is(err, localerrors.ErrPathTraversal) {
+				t.Fatalf("LoadList(%q) error = %v, want it to wrap ErrPathTraversal", uri, err)
+			}
+		})
+	}
+}
+
+// TestIsContainedPath covers the traversal-containment helper directly.
+func TestIsContainedPath(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		{"token_status_list/DE/mDL/abc/full_list.json", true},
+		{"identifier_list/DE/mDL/abc/full_list.json", true},
+		{"../full_list.json", false},
+		{"../../etc/full_list.json", false},
+		{"token_status_list/../../../etc/full_list.json", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := isContainedPath(tt.path); got != tt.expected {
+				t.Errorf("isContainedPath(%q) = %v, expected %v", tt.path, got, tt.expected)
+			}
+		})
 	}
 }
 
