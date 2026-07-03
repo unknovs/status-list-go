@@ -169,7 +169,7 @@ jobs:
 
       - name: Upload Docker image tar (PRs)
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v7
         with:
           name: docker-image-tar
           path: status-list-go.tar
@@ -187,7 +187,7 @@ jobs:
 
       - name: Download Docker image tar (PRs)
         if: github.event_name == 'pull_request'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
         with:
           name: docker-image-tar
           path: .
