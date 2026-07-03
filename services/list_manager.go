@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/unknovs/status-list-go/config"
-	"github.com/unknovs/status-list-go/debuglog"
 	"github.com/unknovs/status-list-go/models"
 	"github.com/unknovs/status-list-go/services/storage"
 
@@ -55,12 +54,10 @@ func (lm *ListManager) NewList(country, doctype string) {
 	}
 
 	if lm.statusList[country][doctype] != nil {
-		debuglog.Printf("NewList: list already exists for %s/%s, skipping", country, doctype)
 		return
 	}
 
 	newRand := uuid.New().String()
-	debuglog.Printf("NewList: creating list for %s/%s rand=%s", country, doctype, newRand)
 	lm.statusList[country][doctype] = &models.StatusListData{
 		TokenStatusList: models.NewIssuerStatusList(1, lm.config.TokenStatusListSize, "random"),
 		IdentifierList:  make(map[string]int),
@@ -71,11 +68,8 @@ func (lm *ListManager) NewList(country, doctype string) {
 
 // DumpList saves the status list to disk
 func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, doctype string) error {
-	start := time.Now()
 	rand := statusListData.Rand
-	debuglog.Printf("DumpList: enter country=%s doctype=%s rand=%s", country, doctype, rand)
 
-	// Generate URIs before saving so they're included in the JSON from the start
 	statusListURI, identifierListURI := lm.buildURIs(country, doctype, rand)
 
 	// Update URIs in the status list data before marshaling
@@ -92,19 +86,14 @@ func (lm *ListManager) DumpList(statusListData *models.StatusListData, country, 
 		return err
 	}
 
-	// Save JSON files (now includes URIs)
 	if err := lm.saveJSONFiles(country, doctype, rand, jsonData); err != nil {
-		debuglog.Printf("DumpList: saveJSONFiles failed after %s: %v", time.Since(start), err)
 		return err
 	}
 
-	// Generate and save all format files
 	if err := lm.saveFormatFiles(statusListData, country, doctype, rand, statusListURI, identifierListURI); err != nil {
-		debuglog.Printf("DumpList: saveFormatFiles failed after %s: %v", time.Since(start), err)
 		return err
 	}
 
-	debuglog.Printf("DumpList: done country=%s doctype=%s rand=%s elapsed=%s", country, doctype, rand, time.Since(start))
 	return nil
 }
 
@@ -281,9 +270,6 @@ func (lm *ListManager) LoadList(uri string) (*models.StatusListData, error) {
 // and avoid deadlock ā€” the recursive call that existed here has been replaced with
 // an in-place list rotation, because sync.Mutex is not reentrant.
 func (lm *ListManager) TakeIndexList(country, doctype, expiryDate string) (int, error) {
-	start := time.Now()
-	debuglog.Printf("TakeIndexList: enter country=%s doctype=%s expiry=%s", country, doctype, expiryDate)
-
 	lm.mutex.Lock()
 	defer lm.mutex.Unlock()
 
@@ -293,7 +279,6 @@ func (lm *ListManager) TakeIndexList(country, doctype, expiryDate string) (int, 
 
 	if lm.statusList[country][doctype] == nil {
 		newRand := uuid.New().String()
-		debuglog.Printf("TakeIndexList: creating new list country=%s doctype=%s rand=%s", country, doctype, newRand)
 		lm.statusList[country][doctype] = &models.StatusListData{
 			TokenStatusList: models.NewIssuerStatusList(1, lm.config.TokenStatusListSize, "random"),
 			IdentifierList:  make(map[string]int),
@@ -303,24 +288,14 @@ func (lm *ListManager) TakeIndexList(country, doctype, expiryDate string) (int, 
 	}
 
 	statusListData := lm.statusList[country][doctype]
-	debuglog.Printf("TakeIndexList: using list rand=%s available=%d",
-		statusListData.Rand, statusListData.TokenStatusList.Allocator.AvailableCount())
 
-	// Take index from allocator
 	index, err := statusListData.TokenStatusList.Allocator.Take()
 	if err != nil {
-		// List is full ā€” persist it, then rotate to a new list in-place.
-		// A recursive call here would deadlock because sync.Mutex is not reentrant.
-		debuglog.Printf("TakeIndexList: list full for %s/%s rand=%s, rotating", country, doctype, statusListData.Rand)
-		dumpStart := time.Now()
 		if dumpErr := lm.DumpList(statusListData, country, doctype); dumpErr != nil {
-			debuglog.Printf("TakeIndexList: dump of full list failed: %v", dumpErr)
 			return 0, fmt.Errorf("failed to persist full status list: %w", dumpErr)
 		}
-		debuglog.Printf("TakeIndexList: full list dumped in %s", time.Since(dumpStart))
 
 		newRand := uuid.New().String()
-		debuglog.Printf("TakeIndexList: creating replacement list country=%s doctype=%s rand=%s", country, doctype, newRand)
 		lm.statusList[country][doctype] = &models.StatusListData{
 			TokenStatusList: models.NewIssuerStatusList(1, lm.config.TokenStatusListSize, "random"),
 			IdentifierList:  make(map[string]int),
@@ -346,28 +321,17 @@ func (lm *ListManager) TakeIndexList(country, doctype, expiryDate string) (int, 
 		}
 	}
 
-	debuglog.Printf("TakeIndexList: allocated index=%d expiry=%s available-after=%d",
-		index, *statusListData.Expires, statusListData.TokenStatusList.Allocator.AvailableCount())
-
-	dumpStart := time.Now()
 	if err := lm.DumpList(statusListData, country, doctype); err != nil {
 		return 0, err
 	}
-	debuglog.Printf("TakeIndexList: dump took %s, total elapsed=%s", time.Since(dumpStart), time.Since(start))
 
 	return index, nil
 }
 
 // GenerateStatusListInfo generates the structure sent to the issuer.
-// TakeIndexList creates the in-memory list if it doesn't exist, so there is no
-// need for a separate NewList call here (which would introduce a TOCTOU race).
 func (lm *ListManager) GenerateStatusListInfo(country, doctype, expiryDate string) (*models.StatusListInfo, error) {
-	start := time.Now()
-	debuglog.Printf("GenerateStatusListInfo: enter country=%s doctype=%s expiry=%s", country, doctype, expiryDate)
-
 	index, err := lm.TakeIndexList(country, doctype, expiryDate)
 	if err != nil {
-		debuglog.Printf("GenerateStatusListInfo: TakeIndexList failed after %s: %v", time.Since(start), err)
 		return nil, err
 	}
 
@@ -380,8 +344,6 @@ func (lm *ListManager) GenerateStatusListInfo(country, doctype, expiryDate strin
 	statusListURI := statusListData.StatusListURI
 	identifierListURI := statusListData.IdentifierListURI
 	lm.mutex.RUnlock()
-
-	debuglog.Printf("GenerateStatusListInfo: done index=%d uri=%s elapsed=%s", index, statusListURI, time.Since(start))
 
 	statusListInfo := &models.StatusListInfo{}
 	statusListInfo.StatusList.URI = statusListURI

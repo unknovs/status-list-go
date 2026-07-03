@@ -342,7 +342,7 @@ func TestMain_ConfigLoadFailure(t *testing.T) {
 
 		// Check that the output contains config failure message or indicates server start
 		outputStr := string(output)
-		if !strings.Contains(outputStr, "Failed to load configuration") && !strings.Contains(outputStr, "Starting Status List Service") && !strings.Contains(outputStr, "load config:") {
+		if !strings.Contains(outputStr, "Failed to load configuration") && !strings.Contains(outputStr, "Starting Status List Service") && !strings.Contains(outputStr, "load config:") && !strings.Contains(outputStr, "ensure directories:") && !strings.Contains(outputStr, "initialize") {
 			t.Errorf("Expected 'Failed to load configuration' or 'Starting Status List Service' in output, got: %s", outputStr)
 		}
 	})

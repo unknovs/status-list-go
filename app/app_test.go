@@ -8,57 +8,36 @@ import (
 
 	"github.com/valyala/fasthttp"
 
-	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/services/storage"
 )
 
-func newTestConfig(t *testing.T) *config.Config {
+func newTestApp(t *testing.T) *App {
 	t.Helper()
+
+	tempDir := t.TempDir()
+
 	t.Setenv("METRICS_ENABLED", "false")
+	t.Setenv("SERVICE_NAME", "test")
+	t.Setenv("API_KEY", "test-api-key")
+	t.Setenv("SERVICE_URL", "http://localhost:8080/")
+	t.Setenv("STATUS_LIST_DIR", filepath.Join(tempDir, "status"))
+	t.Setenv("BACKUP_DIR", filepath.Join(tempDir, "backup"))
+	t.Setenv("LOG_DIR", filepath.Join(tempDir, "logs"))
+	t.Setenv("PRIVATE_KEY_PATH", filepath.Join(tempDir, "key.pem"))
+	t.Setenv("CERTIFICATE_PATH", filepath.Join(tempDir, "cert.pem"))
+	t.Setenv("COUNTRY_CODE", "LV")
+	t.Setenv("STATUS_LIST_STORAGE", "local")
+	t.Setenv("ALLOWED_DOCTYPES", "PID")
 
-	tempDir, err := os.MkdirTemp("", "status-list-app-test")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(tempDir) })
-
-	statusDir := filepath.Join(tempDir, "status")
-	if err := os.MkdirAll(statusDir, 0o755); err != nil {
-		t.Fatalf("failed to create status dir: %v", err)
-	}
-
-	backupDir := filepath.Join(tempDir, "backup")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("failed to create backup dir: %v", err)
-	}
-
-	logDir := filepath.Join(tempDir, "logs")
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		t.Fatalf("failed to create log dir: %v", err)
-	}
-
-	return &config.Config{
-		APIKey:              "test-api-key",
-		ServiceURL:          "http://localhost:8080/",
-		SwaggerURLPrefix:    "",
-		TokenStatusListSize: 10,
-		StatusListDir:       statusDir,
-		BackupDir:           backupDir,
-		LogDir:              logDir,
-		PrivKeyPath:         filepath.Join(tempDir, "key.pem"),
-		CertPath:            filepath.Join(tempDir, "cert.pem"),
-		CountryCode:         "LV",
-		BackendType:         "local",
-		AllowedDoctypes:     map[string]bool{"PID": true},
-	}
-}
-
-func TestNewAppInitializesAzugo(t *testing.T) {
-	cfg := newTestConfig(t)
-	application, err := NewApp(cfg)
+	application, err := NewApp(nil, "")
 	if err != nil {
 		t.Fatalf("NewApp failed: %v", err)
 	}
+	return application
+}
+
+func TestNewAppInitializesAzugo(t *testing.T) {
+	application := newTestApp(t)
 
 	if application == nil {
 		t.Fatal("expected NewApp to return a non-nil instance")
@@ -75,10 +54,7 @@ func TestNewAppInitializesAzugo(t *testing.T) {
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	application, err := NewApp(newTestConfig(t))
-	if err != nil {
-		t.Fatalf("NewApp failed: %v", err)
-	}
+	application := newTestApp(t)
 
 	resp := executeRequest(t, application, fasthttp.MethodGet, "/health", nil)
 
@@ -100,10 +76,7 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestCORSMiddlewareAddsHeaders(t *testing.T) {
-	application, err := NewApp(newTestConfig(t))
-	if err != nil {
-		t.Fatalf("NewApp failed: %v", err)
-	}
+	application := newTestApp(t)
 
 	// Azugo's built-in CORS only sets response headers when an Origin is present.
 	resp := executeRequest(t, application, fasthttp.MethodGet, "/health", map[string]string{
@@ -116,10 +89,7 @@ func TestCORSMiddlewareAddsHeaders(t *testing.T) {
 }
 
 func TestOptionsPreflightShortCircuits(t *testing.T) {
-	application, err := NewApp(newTestConfig(t))
-	if err != nil {
-		t.Fatalf("NewApp failed: %v", err)
-	}
+	application := newTestApp(t)
 
 	// Azugo's built-in CORS preflight returns 204 No Content (not 200).
 	resp := executeRequest(t, application, fasthttp.MethodOptions, "/token_status_list/take", map[string]string{
@@ -132,11 +102,7 @@ func TestOptionsPreflightShortCircuits(t *testing.T) {
 }
 
 func TestSwaggerIndexServed(t *testing.T) {
-	cfg := newTestConfig(t)
-	application, err := NewApp(cfg)
-	if err != nil {
-		t.Fatalf("NewApp failed: %v", err)
-	}
+	application := newTestApp(t)
 
 	resp := executeRequest(t, application, fasthttp.MethodGet, "/token_status_list/swagger", nil)
 
@@ -170,3 +136,6 @@ func executeRequest(t *testing.T, application *App, method, path string, headers
 
 	return &resp
 }
+
+// TestMain_unused is here to ensure the os import is used in test setup.
+var _ = os.Getenv

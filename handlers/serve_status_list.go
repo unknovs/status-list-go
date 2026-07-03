@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"azugo.io/azugo"
+	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
 
-	"github.com/unknovs/status-list-go/errors"
-	"github.com/valyala/fasthttp"
+	localerrors "github.com/unknovs/status-list-go/errors"
 )
 
 const (
@@ -24,11 +24,11 @@ func (h *StatusListHandler) ServeStatusList(ctx *azugo.Context) {
 	rand := ctx.Params.String("id")
 
 	if !h.config.ValidateCountry(country) {
-		writeError(ctx, fasthttp.StatusBadRequest, errors.ErrInvalidCountry)
+		ctx.Error(pkerrors.HTTP("statusList", "invalid", "invalid country code"))
 		return
 	}
 	if !h.config.ValidateDoctype(doctype) {
-		writeError(ctx, fasthttp.StatusBadRequest, errors.ErrInvalidDoctype)
+		ctx.Error(pkerrors.HTTP("statusList", "invalid", "invalid document type"))
 		return
 	}
 
@@ -46,7 +46,7 @@ func (h *StatusListHandler) ServeStatusList(ctx *azugo.Context) {
 		contentType = StatusListCWTContentType
 		fileName = "token_status_list.cwt"
 	default:
-		writeError(ctx, fasthttp.StatusNotAcceptable, errors.ErrInvalidAccept)
+		ctx.Error(pkerrors.HTTP("statusList", "notAcceptable"))
 		return
 	}
 
@@ -54,10 +54,10 @@ func (h *StatusListHandler) ServeStatusList(ctx *azugo.Context) {
 
 	data, err := h.listManager.GetStorage().Read(statusListPath)
 	if err != nil {
-		if stdErrors.Is(err, errors.ErrNotFound) {
-			writeError(ctx, fasthttp.StatusNotFound, errors.ErrListNotFound)
+		if stdErrors.Is(err, localerrors.ErrNotFound) {
+			ctx.Error(pkerrors.HTTP("statusList", "notFound"))
 		} else {
-			writeError(ctx, fasthttp.StatusInternalServerError, errors.ErrInternalServer)
+			ctx.Error(pkerrors.InternalError{Err: err})
 		}
 		return
 	}

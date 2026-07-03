@@ -9,9 +9,10 @@ import (
 
 	"azugo.io/azugo"
 	"github.com/valyala/fasthttp"
+	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
 
 	"github.com/unknovs/status-list-go/config"
-	"github.com/unknovs/status-list-go/errors"
+	localerrors "github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/handlers"
 )
 
@@ -26,8 +27,10 @@ func Init(app *azugo.App, cfg *config.Config, handler *handlers.StatusListHandle
 	isPublicMode := determineServiceMode(cfg)
 
 	if !isPublicMode {
-		app.Post(prefix("/token_status_list/take"), handler.TakeIndex)
-		app.Post(prefix("/token_status_list/set"), handler.SetIndex)
+		internal := app.Group(prefix("/token_status_list"))
+		internal.Use(apiKeyMiddleware(cfg.APIKey))
+		internal.Post("/take", handler.TakeIndex)
+		internal.Post("/set", handler.SetIndex)
 	}
 	app.Get(prefix("/token_status_list/get"), handler.GetIndex)
 	app.Get(prefix("/token_status_list/{country}/{doctype}/{id}"), handler.ServeStatusList)
@@ -59,8 +62,10 @@ func Init(app *azugo.App, cfg *config.Config, handler *handlers.StatusListHandle
 		app.Get("/token_status_list/get", handler.GetIndex)
 		app.Get("/token_status_list/{country}/{doctype}/{id}", handler.ServeStatusList)
 		if !isPublicMode {
-			app.Post("/token_status_list/take", handler.TakeIndex)
-			app.Post("/token_status_list/set", handler.SetIndex)
+			fb := app.Group("/token_status_list")
+			fb.Use(apiKeyMiddleware(cfg.APIKey))
+			fb.Post("/take", handler.TakeIndex)
+			fb.Post("/set", handler.SetIndex)
 		}
 		app.Get("/health", func(ctx *azugo.Context) {
 			ctx.SkipRequestLog()
@@ -154,8 +159,8 @@ func serveSwaggerJSON(ctx *azugo.Context, cfg *config.Config) {
 		msg := "swagger.json not found. Paths tried: " + strings.Join(paths, ", ")
 		ctx.StatusCode(fasthttp.StatusNotFound)
 		ctx.Header.Set("Content-Type", "application/json")
-		ctx.JSON(errors.ErrorResponse{
-			Error: errors.ErrorDetail{Code: errors.ErrListNotFound, Message: msg},
+		ctx.JSON(localerrors.ErrorResponse{
+			Error: localerrors.ErrorDetail{Code: localerrors.ErrListNotFound, Message: msg},
 		})
 		return
 	}
@@ -164,8 +169,8 @@ func serveSwaggerJSON(ctx *azugo.Context, cfg *config.Config) {
 	if err != nil {
 		ctx.StatusCode(fasthttp.StatusInternalServerError)
 		ctx.Header.Set("Content-Type", "application/json")
-		ctx.JSON(errors.ErrorResponse{
-			Error: errors.ErrorDetail{Code: errors.ErrInternalServer, Message: err.Error()},
+		ctx.JSON(localerrors.ErrorResponse{
+			Error: localerrors.ErrorDetail{Code: localerrors.ErrInternalServer, Message: err.Error()},
 		})
 		return
 	}
@@ -279,4 +284,17 @@ func resolveStaticDir() string {
 		}
 	}
 	return candidates[0]
+}
+
+// apiKeyMiddleware rejects requests without a valid X-Api-Key header.
+func apiKeyMiddleware(apiKey string) azugo.RequestHandlerFunc {
+	return func(next azugo.RequestHandler) azugo.RequestHandler {
+		return func(ctx *azugo.Context) {
+			if ctx.Header.Get(handlers.APIKeyHeader) != apiKey {
+				ctx.Error(pkerrors.HTTP("request", "unauthorized"))
+				return
+			}
+			next(ctx)
+		}
+	}
 }

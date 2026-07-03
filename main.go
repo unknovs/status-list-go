@@ -10,7 +10,6 @@ import (
 
 	"github.com/unknovs/status-list-go/app"
 	"github.com/unknovs/status-list-go/cleanup"
-	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/renewal"
 )
 
@@ -32,16 +31,16 @@ func newRootCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status-list",
 		Short: "Status List Service",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return runServer()
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runServer(cmd)
 		},
 	}
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "serve",
 		Short: "Run the HTTP server",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return runServer()
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runServer(cmd)
 		},
 	})
 
@@ -56,19 +55,14 @@ func newRootCommand() *cobra.Command {
 	return cmd
 }
 
-func runServer() error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-
-	application, err := app.NewApp(cfg)
+func runServer(cmd *cobra.Command) error {
+	application, err := app.NewApp(cmd, version)
 	if err != nil {
 		return err
 	}
 
-	renewal.StartRenewalThread(cfg, application.Storage())
-	cleanup.StartCleanupWorker(cfg, application.Storage())
+	renewal.StartRenewalThread(application.Config(), application.Storage(), application.Azugo().Log())
+	cleanup.StartCleanupWorker(application.Config(), application.Storage(), application.Azugo().Log())
 
 	return application.Run()
 }

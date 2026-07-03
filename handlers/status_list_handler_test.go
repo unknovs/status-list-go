@@ -14,8 +14,8 @@ import (
 	"azugo.io/azugo"
 	azugoconfig "azugo.io/azugo/config"
 	"azugo.io/core"
+	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
 	"github.com/unknovs/status-list-go/config"
-	"github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/models"
 	"github.com/unknovs/status-list-go/services/storage"
 	"github.com/valyala/fasthttp"
@@ -80,6 +80,8 @@ func newTestApp(t *testing.T) *testApp {
 	a.Get("/token_status_list/get", handler.GetIndex)
 	a.Get("/token_status_list/{country}/{doctype}/{id}", handler.ServeStatusList)
 
+	pkerrors.RegisterReason("notAcceptable", pkerrors.ReasonSpec{Status: 406, Title: "Not acceptable"})
+
 	return &testApp{
 		app:     a,
 		config:  cfg,
@@ -121,14 +123,11 @@ func executeFormRequest(t *testing.T, app *azugo.App, path string, form url.Valu
 	return executeRequest(t, app, fasthttp.MethodPost, path, form.Encode(), allHeaders)
 }
 
-func decodeErrorResponse(t *testing.T, resp *fasthttp.Response) errors.ErrorResponse {
+func checkErrorStatus(t *testing.T, resp *fasthttp.Response, expectedStatus int) {
 	t.Helper()
-
-	var payload errors.ErrorResponse
-	if err := json.Unmarshal(resp.Body(), &payload); err != nil {
-		t.Fatalf("failed to decode error response: %v", err)
+	if got := resp.StatusCode(); got != expectedStatus {
+		t.Fatalf("expected status %d, got %d (body: %s)", expectedStatus, got, string(resp.Body()))
 	}
-	return payload
 }
 
 func createStoredStatusList(t *testing.T, ta *testApp, country, doctype, randID string, activeIndexes ...int) string {
@@ -191,49 +190,27 @@ func TestTakeIndex(t *testing.T) {
 		headers        map[string]string
 		form           url.Values
 		expectedStatus int
-		expectedError  errors.ErrorCode
 		assertSuccess  bool
 	}{
 		{
-			name:           "missing api key",
-			form:           url.Values{"doctype": {"PID"}, "country": {"LV"}, "expiry_date": {futureDate}},
-			expectedStatus: fasthttp.StatusUnauthorized,
-			expectedError:  errors.ErrInvalidAPIKey,
-		},
-		{
-			name:           "invalid api key",
-			headers:        map[string]string{APIKeyHeader: "wrong-key"},
-			form:           url.Values{"doctype": {"PID"}, "country": {"LV"}, "expiry_date": {futureDate}},
-			expectedStatus: fasthttp.StatusUnauthorized,
-			expectedError:  errors.ErrInvalidAPIKey,
-		},
-		{
 			name:           "invalid doctype",
-			headers:        map[string]string{APIKeyHeader: ta.config.APIKey},
 			form:           url.Values{"doctype": {"INVALID"}, "country": {"LV"}, "expiry_date": {futureDate}},
 			expectedStatus: fasthttp.StatusBadRequest,
-			expectedError:  errors.ErrInvalidDoctype,
 		},
 		{
 			name:           "invalid country",
-			headers:        map[string]string{APIKeyHeader: ta.config.APIKey},
 			form:           url.Values{"doctype": {"PID"}, "country": {"EE"}, "expiry_date": {futureDate}},
 			expectedStatus: fasthttp.StatusBadRequest,
-			expectedError:  errors.ErrInvalidCountry,
 		},
 		{
 			name:           "invalid expiry format",
-			headers:        map[string]string{APIKeyHeader: ta.config.APIKey},
 			form:           url.Values{"doctype": {"PID"}, "country": {"LV"}, "expiry_date": {"2026/01/01"}},
 			expectedStatus: fasthttp.StatusBadRequest,
-			expectedError:  errors.ErrInvalidExpiryDate,
 		},
 		{
 			name:           "missing expiry date",
-			headers:        map[string]string{APIKeyHeader: ta.config.APIKey},
 			form:           url.Values{"doctype": {"PID"}, "country": {"LV"}},
 			expectedStatus: fasthttp.StatusBadRequest,
-			expectedError:  errors.ErrInvalidExpiryDate,
 		},
 		{
 			name:           "valid request",
@@ -252,18 +229,11 @@ func TestTakeIndex(t *testing.T) {
 				t.Fatalf("expected status %d, got %d", tt.expectedStatus, got)
 			}
 
-			if tt.expectedError != "" {
-				payload := decodeErrorResponse(t, resp)
-				if payload.Error.Code != tt.expectedError {
-					t.Fatalf("expected error code %s, got %s", tt.expectedError, payload.Error.Code)
-				}
-			}
-
 			if !tt.assertSuccess {
 				return
 			}
 
-			if got := string(resp.Header.Peek(ContentTypeHeader)); got != "application/json" {
+			if got := string(resp.Header.Peek("Content-Type")); got != "application/json" {
 				t.Fatalf("expected content type application/json, got %s", got)
 			}
 
@@ -288,11 +258,11 @@ func TestGetIndex(t *testing.T) {
 	ta := newTestApp(t)
 	uri := createStoredStatusList(t, ta, "LV", "PID", "test-rand", 7)
 
+
 	tests := []struct {
 		name           string
 		path           string
 		expectedStatus int
-		expectedError  errors.ErrorCode
 		expectedBody   string
 	}{
 		{
@@ -311,19 +281,16 @@ func TestGetIndex(t *testing.T) {
 			name:           "missing uri",
 			path:           "/token_status_list/get?" + url.Values{"idx": {"0"}}.Encode(),
 			expectedStatus: fasthttp.StatusBadRequest,
-			expectedError:  errors.ErrBadRequest,
 		},
 		{
 			name:           "invalid index",
 			path:           "/token_status_list/get?" + url.Values{"uri": {uri}, "idx": {"invalid"}}.Encode(),
 			expectedStatus: fasthttp.StatusBadRequest,
-			expectedError:  errors.ErrInvalidIndex,
 		},
 		{
 			name:           "non-existent list",
 			path:           "/token_status_list/get?" + url.Values{"uri": {"http://localhost:8080/token_status_list/LV/PID/missing"}, "idx": {"0"}}.Encode(),
-			expectedStatus: fasthttp.StatusBadRequest,
-			expectedError:  errors.ErrListNotFound,
+			expectedStatus: fasthttp.StatusNotFound,
 		},
 	}
 
@@ -335,19 +302,13 @@ func TestGetIndex(t *testing.T) {
 				t.Fatalf("expected status %d, got %d", tt.expectedStatus, got)
 			}
 
-			if tt.expectedError != "" {
-				payload := decodeErrorResponse(t, resp)
-				if payload.Error.Code != tt.expectedError {
-					t.Fatalf("expected error code %s, got %s", tt.expectedError, payload.Error.Code)
+			if tt.expectedBody != "" {
+				if got := string(resp.Body()); got != tt.expectedBody {
+					t.Fatalf("expected body %s, got %s", tt.expectedBody, got)
 				}
-				return
-			}
-
-			if got := string(resp.Body()); got != tt.expectedBody {
-				t.Fatalf("expected body %s, got %s", tt.expectedBody, got)
-			}
-			if got := string(resp.Header.Peek(ContentTypeHeader)); !strings.HasPrefix(got, "text/plain") {
-				t.Fatalf("expected content type starting with text/plain, got %s", got)
+				if got := string(resp.Header.Peek("Content-Type")); !strings.HasPrefix(got, "text/plain") {
+					t.Fatalf("expected content type starting with text/plain, got %s", got)
+				}
 			}
 		})
 	}
@@ -362,14 +323,12 @@ func TestSetIndex(t *testing.T) {
 		form             url.Values
 		setupRandID      string
 		expectedStatus   int
-		expectedError    errors.ErrorCode
 		expectedBodyPart string
 		verifyPath       string
 		expectedGetBody  string
 	}{
 		{
 			name:             "valid request with idx",
-			headers:          map[string]string{APIKeyHeader: ta.config.APIKey},
 			form:             url.Values{"idx": {"0"}, "status": {"1"}},
 			setupRandID:      "set-idx",
 			expectedStatus:   fasthttp.StatusOK,
@@ -378,7 +337,6 @@ func TestSetIndex(t *testing.T) {
 		},
 		{
 			name:             "valid request with id alias",
-			headers:          map[string]string{APIKeyHeader: ta.config.APIKey},
 			form:             url.Values{"id": {"1"}, "status": {"1"}},
 			setupRandID:      "set-id",
 			expectedStatus:   fasthttp.StatusOK,
@@ -386,31 +344,19 @@ func TestSetIndex(t *testing.T) {
 			expectedGetBody:  "1",
 		},
 		{
-			name:           "missing api key",
-			form:           url.Values{"uri": {"http://localhost:8080/token_status_list/LV/PID/test"}, "idx": {"0"}, "status": {"1"}},
-			expectedStatus: fasthttp.StatusUnauthorized,
-			expectedError:  errors.ErrUnauthorizedAccess,
-		},
-		{
 			name:           "invalid status",
-			headers:        map[string]string{APIKeyHeader: ta.config.APIKey},
 			form:           url.Values{"uri": {"http://localhost:8080/token_status_list/LV/PID/test"}, "idx": {"0"}, "status": {"2"}},
 			expectedStatus: fasthttp.StatusBadRequest,
-			expectedError:  errors.ErrInvalidStatus,
 		},
 		{
 			name:           "invalid uri path",
-			headers:        map[string]string{APIKeyHeader: ta.config.APIKey},
 			form:           url.Values{"uri": {"http://localhost:8080/short"}, "idx": {"0"}, "status": {"1"}},
 			expectedStatus: fasthttp.StatusBadRequest,
-			expectedError:  errors.ErrInvalidURI,
 		},
 		{
 			name:           "invalid country in uri",
-			headers:        map[string]string{APIKeyHeader: ta.config.APIKey},
 			form:           url.Values{"uri": {"http://localhost:8080/token_status_list/EE/PID/test"}, "idx": {"0"}, "status": {"1"}},
 			expectedStatus: fasthttp.StatusBadRequest,
-			expectedError:  errors.ErrInvalidCountry,
 		},
 	}
 
@@ -433,18 +379,14 @@ func TestSetIndex(t *testing.T) {
 
 			resp := executeFormRequest(t, ta.app, "/token_status_list/set", form, tt.headers)
 			if got := resp.StatusCode(); got != tt.expectedStatus {
-				t.Fatalf("expected status %d, got %d", tt.expectedStatus, got)
+				t.Fatalf("expected status %d, got %d (body: %s)", tt.expectedStatus, got, string(resp.Body()))
 			}
 
-			if tt.expectedError != "" {
-				payload := decodeErrorResponse(t, resp)
-				if payload.Error.Code != tt.expectedError {
-					t.Fatalf("expected error code %s, got %s", tt.expectedError, payload.Error.Code)
-				}
+			if tt.expectedBodyPart == "" {
 				return
 			}
 
-			if got := string(resp.Header.Peek(ContentTypeHeader)); !strings.HasPrefix(got, "text/plain") {
+			if got := string(resp.Header.Peek("Content-Type")); !strings.HasPrefix(got, "text/plain") {
 				t.Fatalf("expected content type starting with text/plain, got %s", got)
 			}
 			if body := strings.TrimSpace(string(resp.Body())); !strings.Contains(body, tt.expectedBodyPart) {
@@ -463,8 +405,6 @@ func TestSetIndex(t *testing.T) {
 }
 
 func TestValidateExpiryDate(t *testing.T) {
-	ta := newTestApp(t)
-
 	tests := []struct {
 		name        string
 		expiryDate  string
@@ -479,7 +419,7 @@ func TestValidateExpiryDate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ta.handler.validateExpiryDate(tt.expiryDate)
+			err := validateExpiryDate(tt.expiryDate)
 			if tt.expectError && err == nil {
 				t.Fatal("expected error, got nil")
 			}

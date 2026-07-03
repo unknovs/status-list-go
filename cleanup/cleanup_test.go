@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/models"
 	"github.com/unknovs/status-list-go/services/storage"
@@ -21,7 +23,7 @@ func TestCleanupExpiredListsLocalStorage(t *testing.T) {
 	}
 
 	cfg := &config.Config{CleanupEnabled: true, CleanupHour: 0, CleanupMinute: 0}
-	service := NewService(cfg, stor)
+	service := NewService(cfg, stor, zap.NewNop())
 
 	expiredDate := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 	futureDate := time.Now().AddDate(0, 0, 3).Format("2006-01-02")

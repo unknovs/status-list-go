@@ -2,10 +2,13 @@ package app
 
 import (
 	"fmt"
+	"os"
 
 	"azugo.io/azugo"
-	azugoconfig "azugo.io/azugo/config"
 	"azugo.io/azugo/server"
+	"github.com/gmb-lib/go-platform-kit/platform"
+	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
+	"github.com/spf13/cobra"
 
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/handlers"
@@ -27,22 +30,36 @@ const (
 )
 
 // NewApp creates and configures a new application instance.
-func NewApp(cfg *config.Config) (*App, error) {
+func NewApp(cmd *cobra.Command, version string) (*App, error) {
+	cfg := config.New()
+
+	azApp, err := server.New(cmd, server.Options{
+		AppName:       serviceName,
+		AppVer:        version,
+		Configuration: cfg,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize azugo: %w", err)
+	}
+
+	if err := platform.Setup(azApp, platform.Options{
+		Config: cfg.BaseConfiguration,
+	}); err != nil {
+		return nil, fmt.Errorf("platform setup: %w", err)
+	}
+
+	pkerrors.RegisterReason("notAcceptable", pkerrors.ReasonSpec{Status: 406, Title: "Not acceptable"})
+
+	if err := ensureDirs(cfg); err != nil {
+		return nil, fmt.Errorf("ensure directories: %w", err)
+	}
+
 	stor, err := storage.NewStorage(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("initialize storage backend: %w", err)
 	}
 
 	statusHandler := handlers.NewStatusListHandler(cfg, stor)
-
-	azApp, err := server.New(nil, server.Options{
-		AppName:       serviceName,
-		AppVer:        defaultVersion,
-		Configuration: azugoconfig.New(),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("initialize azugo: %w", err)
-	}
 
 	azApp.RouterOptions().CORS.SetOrigins("*")
 	azApp.RouterOptions().CORS.SetHeaders("Origin", "Content-Type", "Content-Length", "Accept-Encoding", "X-CSRF-Token", "Authorization", "X-API-Key")
@@ -59,6 +76,15 @@ func NewApp(cfg *config.Config) (*App, error) {
 	}, nil
 }
 
+func ensureDirs(cfg *config.Config) error {
+	for _, dir := range []string{cfg.StatusListDir, cfg.BackupDir, cfg.LogDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create directory %s: %w", dir, err)
+		}
+	}
+	return nil
+}
+
 // Run starts the Azugo HTTP server.
 func (a *App) Run() error {
 	return a.azApp.Start()
@@ -72,4 +98,9 @@ func (a *App) Azugo() *azugo.App {
 // Storage exposes the configured storage backend for background tasks.
 func (a *App) Storage() storage.Storage {
 	return a.storage
+}
+
+// Config returns the application configuration.
+func (a *App) Config() *config.Config {
+	return a.cfg
 }
