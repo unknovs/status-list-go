@@ -1,3 +1,19 @@
+/*
+Copyright (c) Gatis Beikerts
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package storage
 
 import (
@@ -49,9 +65,11 @@ func NewS3Storage(cfg S3Config) (*S3Storage, error) {
 	if cfg.Bucket == "" {
 		return nil, stdErrors.New("S3 bucket is required")
 	}
+
 	if cfg.AccessKeyID == "" {
 		return nil, stdErrors.New("S3 access key ID is required")
 	}
+
 	if cfg.SecretAccessKey == "" {
 		return nil, stdErrors.New("S3 secret access key is required")
 	}
@@ -103,8 +121,10 @@ func buildAWSConfig(ctx context.Context, cfg S3Config) (aws.Config, error) {
 	)
 
 	// Load config with credentials and retry configuration
-	var awsCfg aws.Config
-	var err error
+	var (
+		awsCfg aws.Config
+		err    error
+	)
 
 	if cfg.Region != "" {
 		awsCfg, err = config.LoadDefaultConfig(ctx,
@@ -141,7 +161,6 @@ func (s *S3Storage) validateConnection() error {
 		Bucket:  aws.String(s.bucket),
 		MaxKeys: aws.Int32(1),
 	})
-
 	if err != nil {
 		return fmt.Errorf("S3 connection validation failed: %w", err)
 	}
@@ -158,6 +177,7 @@ func (s *S3Storage) Create(path string, content []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to check if object exists: %w", err)
 	}
+
 	if exists {
 		return fmt.Errorf("%w: %s", errors.ErrAlreadyExists, path)
 	}
@@ -173,7 +193,6 @@ func (s *S3Storage) Create(path string, content []byte) error {
 		Body:     bytes.NewReader(content),
 		Metadata: metadata,
 	})
-
 	if err != nil {
 		return fmt.Errorf("failed to create object in S3: %w", err)
 	}
@@ -189,15 +208,16 @@ func (s *S3Storage) Read(path string) ([]byte, error) {
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(path),
 	})
-
 	if err != nil {
 		var notFound *types.NoSuchKey
 		if stdErrors.As(err, &notFound) {
 			return nil, fmt.Errorf("%w: %s", errors.ErrNotFound, path)
 		}
+
 		return nil, fmt.Errorf("failed to read object from S3: %w", err)
 	}
-	defer result.Body.Close()
+
+	defer result.Body.Close() //nolint:errcheck
 
 	// Read object content
 	data, err := io.ReadAll(result.Body)
@@ -220,6 +240,7 @@ func (s *S3Storage) Write(path string, content []byte, version int) error {
 		if stdErrors.As(err, &nsk) {
 			return fmt.Errorf("failed to get current version: %w", err)
 		}
+
 		currentVersion = 0
 	}
 
@@ -239,7 +260,6 @@ func (s *S3Storage) Write(path string, content []byte, version int) error {
 		Body:     bytes.NewReader(content),
 		Metadata: metadata,
 	})
-
 	if err != nil {
 		return fmt.Errorf("failed to write object to S3: %w", err)
 	}
@@ -255,12 +275,12 @@ func (s *S3Storage) Exists(path string) (bool, error) {
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(path),
 	})
-
 	if err != nil {
 		var notFound *types.NotFound
 		if stdErrors.As(err, &notFound) {
 			return false, nil
 		}
+
 		return false, fmt.Errorf("failed to check object existence: %w", err)
 	}
 
@@ -271,8 +291,10 @@ func (s *S3Storage) Exists(path string) (bool, error) {
 func (s *S3Storage) List(prefix string) ([]string, error) {
 	ctx := context.Background()
 
-	var results []string
-	var continuationToken *string
+	var (
+		results           []string
+		continuationToken *string
+	)
 
 	// S3 ListObjectsV2 returns paginated results
 	for {
@@ -334,7 +356,6 @@ func (s *S3Storage) GetVersion(path string) (int, error) {
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(path),
 	})
-
 	if err != nil {
 		return 0, err
 	}

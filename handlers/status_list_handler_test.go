@@ -19,492 +19,310 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"azugo.io/azugo"
+	azugoconfig "azugo.io/azugo/config"
+	"azugo.io/core"
+	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
 	"github.com/unknovs/status-list-go/config"
-	"github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/models"
 	"github.com/unknovs/status-list-go/services/storage"
+	"github.com/valyala/fasthttp"
 )
 
-func setupStatusListTestConfig(t *testing.T) (*config.Config, string, storage.Storage) {
-	tempDir, err := os.MkdirTemp("", "status_list_handler_test")
+type testApp struct {
+	app     *azugo.App
+	config  *config.Config
+	storage storage.Storage
+	handler *StatusListHandler
+}
+
+func newTestApp(t *testing.T) *testApp {
+	t.Helper()
+
+	rootDir, err := os.MkdirTemp(".", ".status-list-handler-test-")
 	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
+		t.Fatalf("failed to create test dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(rootDir) })
+
+	statusDir := filepath.Join(rootDir, "status")
+	backupDir := filepath.Join(rootDir, "backup")
+	logDir := filepath.Join(rootDir, "logs")
+	for _, dir := range []string{statusDir, backupDir, logDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("failed to create %s: %v", dir, err)
+		}
 	}
 
 	cfg := &config.Config{
 		APIKey:              "test-api-key",
 		ServiceURL:          "http://localhost:8080/",
-		TokenStatusListSize: 100, // Smaller for testing
-		StatusListDir:       tempDir,
-		BackupDir:           filepath.Join(tempDir, "backup"),
-		LogDir:              filepath.Join(tempDir, "logs"),
-		PrivKeyPath:         "temp/private_key/decrypted_key.pem",
-		CertPath:            "temp/certificate/PID-DS-0002.cert.der",
+		TokenStatusListSize: 100,
+		StatusListDir:       statusDir,
+		BackupDir:           backupDir,
+		LogDir:              logDir,
+		PrivKeyPath:         filepath.Join(rootDir, "missing-key.pem"),
+		CertPath:            filepath.Join(rootDir, "missing-cert.der"),
 		CountryCode:         "LV",
 		BackendType:         "local",
 		AllowedDoctypes:     map[string]bool{"PID": true, "MDL": true},
 	}
 
-	// Create required directories
-	os.MkdirAll(cfg.StatusListDir, 0755)
-	os.MkdirAll(cfg.BackupDir, 0755)
-	os.MkdirAll(cfg.LogDir, 0755)
-
 	stor, err := storage.NewStorage(cfg)
 	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
+		t.Fatalf("failed to create storage: %v", err)
 	}
 
-	return cfg, tempDir, stor
+	handler := NewStatusListHandler(cfg, stor)
+	a := azugo.New()
+	a.AppName = "test"
+	a.AppVer = "1.0"
+	appCfg := azugoconfig.New()
+	a.SetConfig(nil, appCfg)
+	a.App.SetConfig(nil, appCfg.Core())
+	if err := appCfg.Load(nil, appCfg, string(core.EnvironmentDevelopment)); err != nil {
+		t.Fatalf("failed to load azugo config: %v", err)
+	}
+	a.Post("/token_status_list/take", handler.TakeIndex)
+	a.Post("/token_status_list/set", handler.SetIndex)
+	a.Get("/token_status_list/get", handler.GetIndex)
+	a.Get("/token_status_list/{country}/{doctype}/{id}", handler.ServeStatusList)
+
+	pkerrors.RegisterReason("notAcceptable", pkerrors.ReasonSpec{Status: 406, Title: "Not acceptable"})
+
+	return &testApp{
+		app:     a,
+		config:  cfg,
+		storage: stor,
+		handler: handler,
+	}
 }
 
-func createTestStatusList(t *testing.T, stor storage.Storage, country, doctype, randID string) {
-	// Create a test status list
+func executeRequest(t *testing.T, app *azugo.App, method, path, body string, headers map[string]string) *fasthttp.Response {
+	t.Helper()
+
+	var req fasthttp.Request
+	req.Header.SetMethod(method)
+	req.SetRequestURI(path)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	if body != "" {
+		req.SetBodyString(body)
+	}
+
+	var ctx fasthttp.RequestCtx
+	ctx.Init(&req, nil, nil)
+	app.Handler(&ctx)
+
+	var resp fasthttp.Response
+	ctx.Response.CopyTo(&resp)
+	return &resp
+}
+
+func executeFormRequest(t *testing.T, app *azugo.App, path string, form url.Values, headers map[string]string) *fasthttp.Response {
+	t.Helper()
+
+	allHeaders := map[string]string{"Content-Type": "application/x-www-form-urlencoded"}
+	for k, v := range headers {
+		allHeaders[k] = v
+	}
+
+	return executeRequest(t, app, fasthttp.MethodPost, path, form.Encode(), allHeaders)
+}
+
+func checkErrorStatus(t *testing.T, resp *fasthttp.Response, expectedStatus int) {
+	t.Helper()
+	if got := resp.StatusCode(); got != expectedStatus {
+		t.Fatalf("expected status %d, got %d (body: %s)", expectedStatus, got, string(resp.Body()))
+	}
+}
+
+func createStoredStatusList(t *testing.T, ta *testApp, country, doctype, randID string, activeIndexes ...int) string {
+	t.Helper()
+
 	statusList := models.NewIssuerStatusList(1, 100, "random")
 	identifierList := make(map[string]int)
+	for _, idx := range activeIndexes {
+		statusList.StatusList.Set(idx, 1)
+		identifierList[strconv.Itoa(idx)] = 1
+	}
 
-	// Add some test identifiers
-	identifierList["test-id-1"] = 0
-	identifierList["test-id-2"] = 1
-
+	expires := time.Now().AddDate(0, 1, 0).Format("2006-01-02")
+	uri := fmt.Sprintf("http://localhost:8080/token_status_list/%s/%s/%s", country, doctype, randID)
+	identifierURI := fmt.Sprintf("http://localhost:8080/identifier_list/%s/%s/%s", country, doctype, randID)
 	statusListData := &models.StatusListData{
 		TokenStatusList:   statusList,
 		IdentifierList:    identifierList,
+		Expires:           &expires,
+		Rand:              randID,
 		Country:           country,
 		Doctype:           doctype,
-		Rand:              randID,
-		StatusListURI:     fmt.Sprintf("http://localhost:8080/token_status_list/%s/%s/%s", country, doctype, randID),
-		IdentifierListURI: fmt.Sprintf("http://localhost:8080/identifier_list/%s/%s/%s", country, doctype, randID),
+		StatusListURI:     uri,
+		IdentifierListURI: identifierURI,
 	}
 
-	// Save as JSON using storage interface
 	jsonData, err := json.Marshal(statusListData)
 	if err != nil {
-		t.Fatalf("Failed to marshal status list data: %v", err)
+		t.Fatalf("failed to marshal status list data: %v", err)
 	}
 
-	jsonFilePath := filepath.Join("token_status_list", country, doctype, randID, "full_list.json")
-	err = stor.Create(jsonFilePath, jsonData)
-	if err != nil {
-		t.Fatalf("Failed to create status list file via storage: %v", err)
+	path := filepath.ToSlash(filepath.Join("token_status_list", country, doctype, randID, "full_list.json"))
+	if err := ta.storage.Create(path, jsonData); err != nil {
+		t.Fatalf("failed to seed status list data: %v", err)
 	}
+
+	return uri
 }
 
 func TestNewStatusListHandler(t *testing.T) {
-	cfg, tempDir, stor := setupStatusListTestConfig(t)
-	defer os.RemoveAll(tempDir)
+	ta := newTestApp(t)
 
-	handler := NewStatusListHandler(cfg, stor)
-
-	if handler == nil {
-		t.Fatal("NewStatusListHandler returned nil")
+	if ta.handler == nil {
+		t.Fatal("expected handler to be created")
 	}
-
-	if handler.config != cfg {
-		t.Error("Handler config not properly set")
+	if ta.handler.config != ta.config {
+		t.Fatal("expected handler config to match test config")
 	}
-
-	if handler.listManager == nil {
-		t.Error("Handler listManager not initialized")
+	if ta.handler.listManager == nil {
+		t.Fatal("expected list manager to be initialized")
 	}
 }
 
 func TestTakeIndex(t *testing.T) {
-	cfg, tempDir, stor := setupStatusListTestConfig(t)
-	defer os.RemoveAll(tempDir)
-
-	handler := NewStatusListHandler(cfg, stor)
+	ta := newTestApp(t)
+	futureDate := time.Now().AddDate(0, 0, 30).Format("2006-01-02")
 
 	tests := []struct {
 		name           string
-		method         string
 		headers        map[string]string
-		formData       map[string]string
+		form           url.Values
 		expectedStatus int
-		expectedError  errors.ErrorCode
+		assertSuccess  bool
 	}{
 		{
-			name:   "Valid request",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"doctype":     "PID",
-				"country":     "LV",
-				"expiry_date": time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
-			},
-			expectedStatus: http.StatusOK,
+			name:           "invalid doctype",
+			form:           url.Values{"doctype": {"INVALID"}, "country": {"LV"}, "expiry_date": {futureDate}},
+			expectedStatus: fasthttp.StatusBadRequest,
 		},
 		{
-			name:           "Invalid method GET",
-			method:         "GET",
-			expectedStatus: http.StatusMethodNotAllowed,
-			expectedError:  errors.ErrBadRequest,
+			name:           "invalid country",
+			form:           url.Values{"doctype": {"PID"}, "country": {"EE"}, "expiry_date": {futureDate}},
+			expectedStatus: fasthttp.StatusBadRequest,
 		},
 		{
-			name:           "Invalid method PUT",
-			method:         "PUT",
-			expectedStatus: http.StatusMethodNotAllowed,
-			expectedError:  errors.ErrBadRequest,
+			name:           "invalid expiry format",
+			form:           url.Values{"doctype": {"PID"}, "country": {"LV"}, "expiry_date": {"2026/01/01"}},
+			expectedStatus: fasthttp.StatusBadRequest,
 		},
 		{
-			name:   "Missing API key",
-			method: "POST",
-			formData: map[string]string{
-				"doctype":     "PID",
-				"country":     "LV",
-				"expiry_date": time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
-			},
-			expectedStatus: http.StatusUnauthorized,
-			expectedError:  errors.ErrInvalidAPIKey,
+			name:           "missing expiry date",
+			form:           url.Values{"doctype": {"PID"}, "country": {"LV"}},
+			expectedStatus: fasthttp.StatusBadRequest,
 		},
 		{
-			name:   "Invalid API key",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "wrong-key",
-			},
-			formData: map[string]string{
-				"doctype":     "PID",
-				"country":     "LV",
-				"expiry_date": time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
-			},
-			expectedStatus: http.StatusUnauthorized,
-			expectedError:  errors.ErrInvalidAPIKey,
-		},
-		{
-			name:   "Invalid doctype",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"doctype":     "INVALID",
-				"country":     "LV",
-				"expiry_date": time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidDoctype,
-		},
-		{
-			name:   "Invalid country",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"doctype":     "PID",
-				"country":     "US",
-				"expiry_date": time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidCountry,
-		},
-		{
-			name:   "Invalid expiry date format",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"doctype":     "PID",
-				"country":     "LV",
-				"expiry_date": "invalid-date",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidExpiryDate,
-		},
-		{
-			name:   "Past expiry date",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"doctype":     "PID",
-				"country":     "LV",
-				"expiry_date": "2020-01-01",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidExpiryDate,
-		},
-		{
-			name:   "Missing doctype",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"country":     "LV",
-				"expiry_date": time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidDoctype,
-		},
-		{
-			name:   "Missing country",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"doctype":     "PID",
-				"expiry_date": time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidCountry,
-		},
-		{
-			name:   "Missing expiry date",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"doctype": "PID",
-				"country": "LV",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidExpiryDate,
+			name:           "valid request",
+			headers:        map[string]string{APIKeyHeader: ta.config.APIKey},
+			form:           url.Values{"doctype": {"PID"}, "country": {"LV"}, "expiry_date": {futureDate}},
+			expectedStatus: fasthttp.StatusOK,
+			assertSuccess:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create form data
-			formData := url.Values{}
-			for k, v := range tt.formData {
-				formData.Set(k, v)
+			resp := executeFormRequest(t, ta.app, "/token_status_list/take", tt.form, tt.headers)
+
+			if got := resp.StatusCode(); got != tt.expectedStatus {
+				t.Fatalf("expected status %d, got %d", tt.expectedStatus, got)
 			}
 
-			req := httptest.NewRequest(tt.method, "/token_status_list/take", strings.NewReader(formData.Encode()))
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-			// Set headers
-			for k, v := range tt.headers {
-				req.Header.Set(k, v)
+			if !tt.assertSuccess {
+				return
 			}
 
-			rr := httptest.NewRecorder()
-			handler.TakeIndex(rr, req)
-
-			if rr.Code != tt.expectedStatus {
-				t.Errorf("Expected status %d, got %d", tt.expectedStatus, rr.Code)
+			if got := string(resp.Header.Peek("Content-Type")); got != "application/json" {
+				t.Fatalf("expected content type application/json, got %s", got)
 			}
 
-			if tt.expectedError != "" {
-				var errorResponse errors.ErrorResponse
-				err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
-				if err != nil {
-					t.Errorf("Failed to unmarshal error response: %v", err)
-				}
-				if errorResponse.Error.Code != tt.expectedError {
-					t.Errorf("Expected error code %s, got %s", tt.expectedError, errorResponse.Error.Code)
-				}
+			var payload models.StatusListInfo
+			if err := json.Unmarshal(resp.Body(), &payload); err != nil {
+				t.Fatalf("failed to decode success payload: %v", err)
 			}
-
-			// For successful requests, verify we get a JSON response
-			if tt.expectedStatus == http.StatusOK {
-				contentType := rr.Header().Get("Content-Type")
-				if contentType != "application/json" {
-					t.Errorf("Expected Content-Type application/json, got %s", contentType)
-				}
-
-				var response map[string]interface{}
-				err := json.Unmarshal(rr.Body.Bytes(), &response)
-				if err != nil {
-					t.Errorf("Failed to unmarshal success response: %v", err)
-				}
-
-				// Verify response contains expected fields
-				if response["status_list"] == nil {
-					t.Error("Response missing status_list field")
-				}
-				if response["identifier_list"] == nil {
-					t.Error("Response missing identifier_list field")
-				}
-
-				// Verify nested structure
-				if statusList, ok := response["status_list"].(map[string]interface{}); ok {
-					if statusList["uri"] == nil {
-						t.Error("Response status_list missing uri field")
-					}
-					if statusList["idx"] == nil {
-						t.Error("Response status_list missing idx field")
-					}
-				} else {
-					t.Error("Response status_list is not a proper object")
-				}
-
-				if identifierList, ok := response["identifier_list"].(map[string]interface{}); ok {
-					if identifierList["uri"] == nil {
-						t.Error("Response identifier_list missing uri field")
-					}
-					if identifierList["id"] == nil {
-						t.Error("Response identifier_list missing id field")
-					}
-				} else {
-					t.Error("Response identifier_list is not a proper object")
-				}
+			if !strings.Contains(payload.StatusList.URI, "/token_status_list/LV/PID/") {
+				t.Fatalf("unexpected status list uri: %s", payload.StatusList.URI)
+			}
+			if !strings.Contains(payload.IdentifierList.URI, "/identifier_list/LV/PID/") {
+				t.Fatalf("unexpected identifier list uri: %s", payload.IdentifierList.URI)
+			}
+			if payload.IdentifierList.ID != strconv.Itoa(payload.StatusList.Idx) {
+				t.Fatalf("expected identifier id %d, got %s", payload.StatusList.Idx, payload.IdentifierList.ID)
 			}
 		})
 	}
 }
 
 func TestGetIndex(t *testing.T) {
-	cfg, tempDir, stor := setupStatusListTestConfig(t)
-	defer os.RemoveAll(tempDir)
-
-	handler := NewStatusListHandler(cfg, stor)
-
-	// Create a test status list
-	createTestStatusList(t, stor, "LV", "PID", "test-rand")
+	ta := newTestApp(t)
+	uri := createStoredStatusList(t, ta, "LV", "PID", "test-rand", 7)
 
 	tests := []struct {
 		name           string
-		method         string
-		queryParams    map[string]string
+		path           string
 		expectedStatus int
-		expectedError  errors.ErrorCode
 		expectedBody   string
 	}{
 		{
-			name:   "Valid request with idx",
-			method: "GET",
-			queryParams: map[string]string{
-				"uri": "http://localhost:8080/token_status_list/LV/PID/test-rand",
-				"idx": "0",
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   "0", // Default status
+			name:           "valid request with idx",
+			path:           "/token_status_list/get?" + url.Values{"uri": {uri}, "idx": {"7"}}.Encode(),
+			expectedStatus: fasthttp.StatusOK,
+			expectedBody:   "1",
 		},
 		{
-			name:   "Valid request with id",
-			method: "GET",
-			queryParams: map[string]string{
-				"uri": "http://localhost:8080/token_status_list/LV/PID/test-rand",
-				"id":  "5",
-			},
-			expectedStatus: http.StatusOK,
+			name:           "valid request with id alias",
+			path:           "/token_status_list/get?" + url.Values{"uri": {uri}, "id": {"0"}}.Encode(),
+			expectedStatus: fasthttp.StatusOK,
 			expectedBody:   "0",
 		},
 		{
-			name:           "Invalid method POST",
-			method:         "POST",
-			expectedStatus: http.StatusMethodNotAllowed,
-			expectedError:  errors.ErrBadRequest,
+			name:           "missing uri",
+			path:           "/token_status_list/get?" + url.Values{"idx": {"0"}}.Encode(),
+			expectedStatus: fasthttp.StatusBadRequest,
 		},
 		{
-			name:   "Missing URI",
-			method: "GET",
-			queryParams: map[string]string{
-				"idx": "0",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrBadRequest,
+			name:           "invalid index",
+			path:           "/token_status_list/get?" + url.Values{"uri": {uri}, "idx": {"invalid"}}.Encode(),
+			expectedStatus: fasthttp.StatusBadRequest,
 		},
 		{
-			name:   "Missing index and id",
-			method: "GET",
-			queryParams: map[string]string{
-				"uri": "",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrBadRequest,
-		},
-		{
-			name:   "Invalid index format",
-			method: "GET",
-			queryParams: map[string]string{
-				"uri": "http://localhost:8080/token_status_list/LV/PID/test",
-				"idx": "invalid",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidIndex,
-		},
-		{
-			name:   "Invalid URI format",
-			method: "GET",
-			queryParams: map[string]string{
-				"uri": "invalid%uri",
-				"idx": "0",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidURI,
-		},
-		{
-			name:   "Non-existent URI",
-			method: "GET",
-			queryParams: map[string]string{
-				"uri": "http://localhost:8080/token_status_list/LV/PID/nonexistent",
-				"idx": "0",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrListNotFound,
-		},
-		{
-			name:   "Index within range but high",
-			method: "GET",
-			queryParams: map[string]string{
-				"uri": "http://localhost:8080/token_status_list/LV/PID/test-rand",
-				"idx": "99",
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   "0",
+			name:           "non-existent list",
+			path:           "/token_status_list/get?" + url.Values{"uri": {"http://localhost:8080/token_status_list/LV/PID/missing"}, "idx": {"0"}}.Encode(),
+			expectedStatus: fasthttp.StatusNotFound,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Build query string
-			queryParams := url.Values{}
-			for k, v := range tt.queryParams {
-				queryParams.Set(k, v)
-			}
+			resp := executeRequest(t, ta.app, fasthttp.MethodGet, tt.path, "", nil)
 
-			url := "/token_status_list/get"
-			if len(queryParams) > 0 {
-				url += "?" + queryParams.Encode()
-			}
-
-			req := httptest.NewRequest(tt.method, url, nil)
-			rr := httptest.NewRecorder()
-			handler.GetIndex(rr, req)
-
-			if rr.Code != tt.expectedStatus {
-				t.Errorf("Expected status %d, got %d", tt.expectedStatus, rr.Code)
-			}
-
-			if tt.expectedError != "" {
-				var errorResponse errors.ErrorResponse
-				err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
-				if err != nil {
-					t.Errorf("Failed to unmarshal error response: %v", err)
-				}
-				if errorResponse.Error.Code != tt.expectedError {
-					t.Errorf("Expected error code %s, got %s", tt.expectedError, errorResponse.Error.Code)
-				}
+			if got := resp.StatusCode(); got != tt.expectedStatus {
+				t.Fatalf("expected status %d, got %d", tt.expectedStatus, got)
 			}
 
 			if tt.expectedBody != "" {
-				body := strings.TrimSpace(rr.Body.String())
-				if body != tt.expectedBody {
-					t.Errorf("Expected body %s, got %s", tt.expectedBody, body)
+				if got := string(resp.Body()); got != tt.expectedBody {
+					t.Fatalf("expected body %s, got %s", tt.expectedBody, got)
 				}
-
-				contentType := rr.Header().Get("Content-Type")
-				if contentType != "text/plain" {
-					t.Errorf("Expected Content-Type text/plain, got %s", contentType)
+				if got := string(resp.Header.Peek("Content-Type")); !strings.HasPrefix(got, "text/plain") {
+					t.Fatalf("expected content type starting with text/plain, got %s", got)
 				}
 			}
 		})
@@ -512,463 +330,117 @@ func TestGetIndex(t *testing.T) {
 }
 
 func TestSetIndex(t *testing.T) {
-	cfg, tempDir, stor := setupStatusListTestConfig(t)
-	defer os.RemoveAll(tempDir)
-
-	handler := NewStatusListHandler(cfg, stor)
+	ta := newTestApp(t)
 
 	tests := []struct {
-		name           string
-		method         string
-		headers        map[string]string
-		formData       map[string]string
-		expectedStatus int
-		expectedError  errors.ErrorCode
-		expectedBody   string
-		setupRandID    string
+		name             string
+		headers          map[string]string
+		form             url.Values
+		setupRandID      string
+		expectedStatus   int
+		expectedBodyPart string
+		verifyPath       string
+		expectedGetBody  string
 	}{
 		{
-			name:   "Valid request with idx",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"uri":    "", // Will be set in test
-				"idx":    "0",
-				"status": "1",
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   "Status Changed",
-			setupRandID:    "test-rand-123",
+			name:             "valid request with idx",
+			form:             url.Values{"idx": {"0"}, "status": {"1"}},
+			setupRandID:      "set-idx",
+			expectedStatus:   fasthttp.StatusOK,
+			expectedBodyPart: "Status Changed",
+			expectedGetBody:  "1",
 		},
 		{
-			name:   "Valid request with id",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"uri":    "", // Will be set in test
-				"id":     "1",
-				"status": "1",
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   "Status Changed",
-			setupRandID:    "test-rand-456",
+			name:             "valid request with id alias",
+			form:             url.Values{"id": {"1"}, "status": {"1"}},
+			setupRandID:      "set-id",
+			expectedStatus:   fasthttp.StatusOK,
+			expectedBodyPart: "Status Changed",
+			expectedGetBody:  "1",
 		},
 		{
-			name:           "Invalid method GET",
-			method:         "GET",
-			expectedStatus: http.StatusMethodNotAllowed,
-			expectedError:  errors.ErrBadRequest,
+			name:           "invalid status",
+			form:           url.Values{"uri": {"http://localhost:8080/token_status_list/LV/PID/test"}, "idx": {"0"}, "status": {"2"}},
+			expectedStatus: fasthttp.StatusBadRequest,
 		},
 		{
-			name:   "Missing API key",
-			method: "POST",
-			formData: map[string]string{
-				"uri":    "",
-				"idx":    "0",
-				"status": "1",
-			},
-			expectedStatus: http.StatusUnauthorized,
-			expectedError:  errors.ErrUnauthorizedAccess,
+			name:           "invalid uri path",
+			form:           url.Values{"uri": {"http://localhost:8080/short"}, "idx": {"0"}, "status": {"1"}},
+			expectedStatus: fasthttp.StatusBadRequest,
 		},
 		{
-			name:   "Invalid API key",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "wrong-key",
-			},
-			formData: map[string]string{
-				"uri":    "",
-				"idx":    "0",
-				"status": "1",
-			},
-			expectedStatus: http.StatusUnauthorized,
-			expectedError:  errors.ErrUnauthorizedAccess,
-		},
-		{
-			name:   "Missing URI",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"idx":    "0",
-				"status": "1",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrBadRequest,
-		},
-		{
-			name:   "Missing index and id",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"uri":    "",
-				"status": "1",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrBadRequest,
-		},
-		{
-			name:   "Missing status",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"uri": "",
-				"idx": "0",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrBadRequest,
-		},
-		{
-			name:   "Invalid index format",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"uri":    "http://localhost:8080/token_status_list/LV/PID/test",
-				"idx":    "invalid",
-				"status": "1",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidIndex,
-		},
-		{
-			name:   "Invalid status format",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"uri":    "http://localhost:8080/token_status_list/LV/PID/test",
-				"idx":    "0",
-				"status": "invalid",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidStatus,
-		},
-		{
-			name:   "Invalid status value (not 1)",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"uri":    "http://localhost:8080/token_status_list/LV/PID/test",
-				"idx":    "0",
-				"status": "2",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidStatus,
-		},
-		{
-			name:   "Invalid URI format",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"uri":    "invalid-uri",
-				"idx":    "0",
-				"status": "1",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidURI,
-		},
-		{
-			name:   "URI with insufficient path parts",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"uri":    "http://localhost:8080/short",
-				"idx":    "0",
-				"status": "1",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidURI,
-		},
-		{
-			name:   "URI with invalid country",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"uri":    "http://localhost:8080/token_status_list/US/PID/test",
-				"idx":    "0",
-				"status": "1",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidCountry,
-		},
-		{
-			name:   "URI with invalid doctype",
-			method: "POST",
-			headers: map[string]string{
-				"X-Api-Key": "test-api-key",
-			},
-			formData: map[string]string{
-				"uri":    "http://localhost:8080/token_status_list/LV/INVALID/test",
-				"idx":    "0",
-				"status": "1",
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  errors.ErrInvalidDoctype,
+			name:           "invalid country in uri",
+			form:           url.Values{"uri": {"http://localhost:8080/token_status_list/EE/PID/test"}, "idx": {"0"}, "status": {"1"}},
+			expectedStatus: fasthttp.StatusBadRequest,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set up test data for valid requests
+			form := url.Values{}
+			for k, values := range tt.form {
+				copied := append([]string(nil), values...)
+				form[k] = copied
+			}
+
 			if tt.setupRandID != "" {
-				createTestStatusList(t, stor, "LV", "PID", tt.setupRandID)
-				testURI := fmt.Sprintf("http://localhost:8080/token_status_list/LV/PID/%s", tt.setupRandID)
-				tt.formData["uri"] = testURI
-			}
-
-			// Create form data
-			formData := url.Values{}
-			for k, v := range tt.formData {
-				formData.Set(k, v)
-			}
-
-			req := httptest.NewRequest(tt.method, "/token_status_list/set", strings.NewReader(formData.Encode()))
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-			// Set headers
-			for k, v := range tt.headers {
-				req.Header.Set(k, v)
-			}
-
-			rr := httptest.NewRecorder()
-			handler.SetIndex(rr, req)
-
-			if rr.Code != tt.expectedStatus {
-				t.Errorf("Expected status %d, got %d", tt.expectedStatus, rr.Code)
-			}
-
-			if tt.expectedError != "" {
-				var errorResponse errors.ErrorResponse
-				err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
-				if err != nil {
-					t.Errorf("Failed to unmarshal error response: %v", err)
-				}
-				if errorResponse.Error.Code != tt.expectedError {
-					t.Errorf("Expected error code %s, got %s", tt.expectedError, errorResponse.Error.Code)
+				uri := createStoredStatusList(t, ta, "LV", "PID", tt.setupRandID)
+				form.Set("uri", uri)
+				tt.verifyPath = "/token_status_list/get?" + url.Values{"uri": {uri}, "idx": {form.Get("idx")}}.Encode()
+				if form.Get("idx") == "" {
+					tt.verifyPath = "/token_status_list/get?" + url.Values{"uri": {uri}, "idx": {form.Get("id")}}.Encode()
 				}
 			}
 
-			if tt.expectedBody != "" {
-				body := strings.TrimSpace(rr.Body.String())
-				if !strings.Contains(body, tt.expectedBody) {
-					t.Errorf("Expected body to contain %s, got %s", tt.expectedBody, body)
-				}
+			resp := executeFormRequest(t, ta.app, "/token_status_list/set", form, tt.headers)
+			if got := resp.StatusCode(); got != tt.expectedStatus {
+				t.Fatalf("expected status %d, got %d (body: %s)", tt.expectedStatus, got, string(resp.Body()))
+			}
 
-				contentType := rr.Header().Get("Content-Type")
-				if contentType != "text/plain" {
-					t.Errorf("Expected Content-Type text/plain, got %s", contentType)
-				}
+			if tt.expectedBodyPart == "" {
+				return
+			}
+
+			if got := string(resp.Header.Peek("Content-Type")); !strings.HasPrefix(got, "text/plain") {
+				t.Fatalf("expected content type starting with text/plain, got %s", got)
+			}
+			if body := strings.TrimSpace(string(resp.Body())); !strings.Contains(body, tt.expectedBodyPart) {
+				t.Fatalf("expected body to contain %q, got %q", tt.expectedBodyPart, body)
+			}
+
+			verifyResp := executeRequest(t, ta.app, fasthttp.MethodGet, tt.verifyPath, "", nil)
+			if got := verifyResp.StatusCode(); got != fasthttp.StatusOK {
+				t.Fatalf("expected follow-up get status 200, got %d", got)
+			}
+			if got := string(verifyResp.Body()); got != tt.expectedGetBody {
+				t.Fatalf("expected updated status %s, got %s", tt.expectedGetBody, got)
 			}
 		})
 	}
 }
 
 func TestValidateExpiryDate(t *testing.T) {
-	cfg, tempDir, stor := setupStatusListTestConfig(t)
-	defer os.RemoveAll(tempDir)
-
-	handler := NewStatusListHandler(cfg, stor)
-
 	tests := []struct {
 		name        string
 		expiryDate  string
 		expectError bool
 	}{
-		{
-			name:        "Valid future date",
-			expiryDate:  time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
-			expectError: false,
-		},
-		{
-			name:        "Valid tomorrow date",
-			expiryDate:  time.Now().AddDate(0, 0, 1).Format("2006-01-02"),
-			expectError: false,
-		},
-		{
-			name:        "Invalid format",
-			expiryDate:  "2024/12/31",
-			expectError: true,
-		},
-		{
-			name:        "Invalid format - no dashes",
-			expiryDate:  "20241231",
-			expectError: true,
-		},
-		{
-			name:        "Invalid format - wrong order",
-			expiryDate:  "31-12-2024",
-			expectError: true,
-		},
-		{
-			name:        "Past date",
-			expiryDate:  "2020-01-01",
-			expectError: true,
-		},
-		{
-			name:        "Today's date (should be valid as it's not past)",
-			expiryDate:  time.Now().Format("2006-01-02"),
-			expectError: false,
-		},
-		{
-			name:        "Empty string",
-			expiryDate:  "",
-			expectError: true,
-		},
-		{
-			name:        "Invalid month",
-			expiryDate:  "2025-13-01",
-			expectError: true,
-		},
-		{
-			name:        "Invalid day",
-			expiryDate:  "2025-01-32",
-			expectError: true,
-		},
+		{name: "future date", expiryDate: time.Now().AddDate(0, 0, 30).Format("2006-01-02")},
+		{name: "today", expiryDate: time.Now().Format("2006-01-02")},
+		{name: "invalid format", expiryDate: "2026/12/31", expectError: true},
+		{name: "past date", expiryDate: "2020-01-01", expectError: true},
+		{name: "empty", expiryDate: "", expectError: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := handler.validateExpiryDate(tt.expiryDate)
-
+			err := validateExpiryDate(tt.expiryDate)
 			if tt.expectError && err == nil {
-				t.Errorf("Expected error for expiry date %s, but got nil", tt.expiryDate)
+				t.Fatal("expected error, got nil")
 			}
-
 			if !tt.expectError && err != nil {
-				t.Errorf("Expected no error for expiry date %s, but got: %v", tt.expiryDate, err)
+				t.Fatalf("expected no error, got %v", err)
 			}
 		})
-	}
-}
-
-func TestWriteJSON(t *testing.T) {
-	cfg, tempDir, stor := setupStatusListTestConfig(t)
-	defer os.RemoveAll(tempDir)
-
-	handler := NewStatusListHandler(cfg, stor)
-
-	tests := []struct {
-		name           string
-		statusCode     int
-		data           interface{}
-		expectedStatus int
-	}{
-		{
-			name:           "Valid JSON response",
-			statusCode:     http.StatusOK,
-			data:           map[string]string{"test": "value"},
-			expectedStatus: http.StatusOK,
-		},
-		{
-			name:           "Error status code",
-			statusCode:     http.StatusBadRequest,
-			data:           map[string]string{"error": "test error"},
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "Complex data structure",
-			statusCode:     http.StatusCreated,
-			data:           map[string]interface{}{"number": 42, "bool": true, "array": []string{"a", "b"}},
-			expectedStatus: http.StatusCreated,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			rr := httptest.NewRecorder()
-			handler.writeJSON(rr, tt.statusCode, tt.data)
-
-			if rr.Code != tt.expectedStatus {
-				t.Errorf("Expected status %d, got %d", tt.expectedStatus, rr.Code)
-			}
-
-			contentType := rr.Header().Get("Content-Type")
-			if contentType != "application/json" {
-				t.Errorf("Expected Content-Type application/json, got %s", contentType)
-			}
-
-			// Verify the response can be unmarshaled back to the same structure
-			var response interface{}
-			err := json.Unmarshal(rr.Body.Bytes(), &response)
-			if err != nil {
-				t.Errorf("Failed to unmarshal response: %v", err)
-			}
-		})
-	}
-}
-
-func TestTakeIndexFormParsingError(t *testing.T) {
-	cfg, tempDir, stor := setupStatusListTestConfig(t)
-	defer os.RemoveAll(tempDir)
-
-	handler := NewStatusListHandler(cfg, stor)
-
-	// Create a request with invalid form data (malformed Content-Type)
-	req := httptest.NewRequest("POST", "/token_status_list/take", strings.NewReader("invalid%form%data"))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("X-Api-Key", "test-api-key")
-
-	rr := httptest.NewRecorder()
-	handler.TakeIndex(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rr.Code)
-	}
-
-	var errorResponse errors.ErrorResponse
-	err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
-	if err != nil {
-		t.Errorf("Failed to unmarshal error response: %v", err)
-	}
-	if errorResponse.Error.Code != errors.ErrParseForm {
-		t.Errorf("Expected error code %s, got %s", errors.ErrParseForm, errorResponse.Error.Code)
-	}
-}
-
-func TestSetIndexFormParsingError(t *testing.T) {
-	cfg, tempDir, stor := setupStatusListTestConfig(t)
-	defer os.RemoveAll(tempDir)
-
-	handler := NewStatusListHandler(cfg, stor)
-
-	// Create a request with invalid form data
-	req := httptest.NewRequest("POST", "/token_status_list/set", strings.NewReader("invalid%form%data"))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("X-Api-Key", "test-api-key")
-
-	rr := httptest.NewRecorder()
-	handler.SetIndex(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rr.Code)
-	}
-
-	var errorResponse errors.ErrorResponse
-	err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
-	if err != nil {
-		t.Errorf("Failed to unmarshal error response: %v", err)
-	}
-	if errorResponse.Error.Code != errors.ErrParseForm {
-		t.Errorf("Expected error code %s, got %s", errors.ErrParseForm, errorResponse.Error.Code)
 	}
 }

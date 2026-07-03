@@ -26,14 +26,10 @@ import (
 
 	"github.com/unknovs/status-list-go/app"
 	"github.com/unknovs/status-list-go/cleanup"
-	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/renewal"
 )
 
-var (
-	version         string
-	healthCheckFlag bool
-)
+var version string
 
 func main() {
 	rootCmd := newRootCommand()
@@ -52,29 +48,22 @@ func newRootCommand() *cobra.Command {
 		Use:   "status-list",
 		Short: "Status List Service",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if healthCheckFlag {
-				performHealthCheck()
-				return nil
-			}
-
-			return runServer()
+			return runServer(cmd)
 		},
 	}
-
-	cmd.Flags().BoolVar(&healthCheckFlag, "health-check", false, "Perform a health check and exit")
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "serve",
 		Short: "Run the HTTP server",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return runServer()
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runServer(cmd)
 		},
 	})
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "health",
 		Short: "Perform a health check",
-		Run: func(cmd *cobra.Command, _ []string) {
+		Run: func(_ *cobra.Command, _ []string) {
 			performHealthCheck()
 		},
 	})
@@ -82,15 +71,14 @@ func newRootCommand() *cobra.Command {
 	return cmd
 }
 
-func runServer() error {
-	cfg, err := config.Load()
+func runServer(cmd *cobra.Command) error {
+	application, err := app.NewApp(cmd, version)
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return err
 	}
 
-	application := app.NewApp(cfg)
-	renewal.StartRenewalThread(cfg, application.Storage())
-	cleanup.StartCleanupWorker(cfg, application.Storage())
+	renewal.StartRenewalThread(application.Config(), application.Storage(), application.Azugo().Log())
+	cleanup.StartCleanupWorker(application.Config(), application.Storage(), application.Azugo().Log())
 
 	return application.Run()
 }
@@ -102,12 +90,13 @@ func performHealthCheck() {
 	}
 
 	client := &http.Client{Timeout: 5 * time.Second}
+
 	resp, err := client.Get(serviceURL + "/health")
 	if err != nil {
 		fmt.Printf("Health check failed: %v\n", err)
 		os.Exit(1)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		fmt.Printf("Health check failed: HTTP %d\n", resp.StatusCode)
