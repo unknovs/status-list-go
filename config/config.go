@@ -19,6 +19,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"azugo.io/core/validation"
@@ -128,6 +129,16 @@ func (c *Configuration) Bind(_ string, v *viper.Viper) {
 
 // Validate normalizes fields and ensures all required directories exist.
 func (c *Configuration) Validate(valid *validation.Validate) error {
+	// Restore the v1.0.5 secret resolution that the viper migration dropped: when a
+	// credential env var holds a path to a mounted secret file (Docker/Kubernetes
+	// secrets), read and trim the file contents instead of using the literal path.
+	// Without this the path string itself is used as the credential, which surfaces
+	// as S3 SignatureDoesNotMatch. Runs before the API key check below so a
+	// file-provided API key is validated on its real value.
+	c.APIKey = resolveSecret(c.APIKey)
+	c.S3AccessKeyID = resolveSecret(c.S3AccessKeyID)
+	c.S3SecretAccessKey = resolveSecret(c.S3SecretAccessKey)
+
 	c.BasePath = NormalizeBasePath(c.BasePath)
 
 	c.ServiceMode = strings.ToLower(strings.TrimSpace(c.ServiceMode))
@@ -152,6 +163,21 @@ func (c *Configuration) Validate(valid *validation.Validate) error {
 	c.AllowedDoctypes = parseAllowedDoctypes(c.AllowedDoctypesRaw)
 
 	return valid.Struct(c)
+}
+
+// resolveSecret returns the trimmed contents of the file at value when value is an
+// absolute path to a readable file (the Docker/Kubernetes secret-mount convention),
+// otherwise it returns value unchanged. This mirrors the v1.0.5 getEnv behaviour that
+// the viper-based configuration dropped. Directory paths and non-existent files fall
+// through to the literal value, so ordinary string credentials are unaffected.
+func resolveSecret(value string) string {
+	if filepath.IsAbs(value) {
+		if data, err := os.ReadFile(value); err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+
+	return value
 }
 
 // NormalizeBasePath ensures configured base paths are canonicalized to a leading slash and no trailing slash.

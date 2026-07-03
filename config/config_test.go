@@ -343,3 +343,71 @@ func TestStorageConfigurationParsing(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveSecret verifies the Docker/Kubernetes secret-file resolution restored
+// after the viper migration dropped it (the cause of S3 SignatureDoesNotMatch when a
+// credential env var points to a mounted secret file).
+func TestResolveSecret(t *testing.T) {
+	dir := t.TempDir()
+
+	secretFile := filepath.Join(dir, "s3_secret")
+	if err := os.WriteFile(secretFile, []byte("super-secret-value\n"), 0o600); err != nil {
+		t.Fatalf("failed to write secret file: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "absolute path to file yields trimmed contents", value: secretFile, want: "super-secret-value"},
+		{name: "plain credential passes through", value: "AKIAIOSFODNN7EXAMPLE", want: "AKIAIOSFODNN7EXAMPLE"},
+		{name: "non-existent absolute path passes through", value: "/no/such/secret/path", want: "/no/such/secret/path"},
+		{name: "directory path passes through", value: dir, want: dir},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveSecret(tt.value); got != tt.want {
+				t.Errorf("resolveSecret(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestValidateResolvesFileBackedCredentials ensures Validate resolves S3 credentials
+// (and the API key) supplied as secret-file paths before they are used, so a file-backed
+// API key is validated on its real value and S3 credentials are the file contents.
+func TestValidateResolvesFileBackedCredentials(t *testing.T) {
+	dir := t.TempDir()
+
+	writeSecret := func(name, contents string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(contents), 0o600); err != nil {
+			t.Fatalf("failed to write %s: %v", name, err)
+		}
+
+		return p
+	}
+
+	cfg := &Config{
+		ServiceMode:       "internal",
+		APIKey:            writeSecret("api_key", "real-api-key\n"),
+		S3AccessKeyID:     writeSecret("s3_access", "REALACCESSKEYID\n"),
+		S3SecretAccessKey: writeSecret("s3_secret", "real-secret-access-key\n"),
+	}
+
+	if err := cfg.Validate(validation.New()); err != nil {
+		t.Fatalf("Validate() returned error: %v", err)
+	}
+
+	if cfg.APIKey != "real-api-key" {
+		t.Errorf("APIKey = %q, want resolved file contents", cfg.APIKey)
+	}
+	if cfg.S3AccessKeyID != "REALACCESSKEYID" {
+		t.Errorf("S3AccessKeyID = %q, want resolved file contents", cfg.S3AccessKeyID)
+	}
+	if cfg.S3SecretAccessKey != "real-secret-access-key" {
+		t.Errorf("S3SecretAccessKey = %q, want resolved file contents", cfg.S3SecretAccessKey)
+	}
+}
