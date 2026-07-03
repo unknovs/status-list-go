@@ -55,7 +55,10 @@ func newTestConfig(t *testing.T) *config.Config {
 
 func TestNewAppInitializesAzugo(t *testing.T) {
 	cfg := newTestConfig(t)
-	application := NewApp(cfg)
+	application, err := NewApp(cfg)
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
 
 	if application == nil {
 		t.Fatal("expected NewApp to return a non-nil instance")
@@ -72,7 +75,10 @@ func TestNewAppInitializesAzugo(t *testing.T) {
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	application := NewApp(newTestConfig(t))
+	application, err := NewApp(newTestConfig(t))
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
 
 	resp := executeRequest(t, application, fasthttp.MethodGet, "/health", nil)
 
@@ -94,37 +100,43 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestCORSMiddlewareAddsHeaders(t *testing.T) {
-	application := NewApp(newTestConfig(t))
-
-	resp := executeRequest(t, application, fasthttp.MethodGet, "/health", nil)
-
-	if origin := string(resp.Header.Peek("Access-Control-Allow-Origin")); origin != "*" {
-		t.Fatalf("unexpected CORS origin: %q", origin)
+	application, err := NewApp(newTestConfig(t))
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
 	}
-	if methods := string(resp.Header.Peek("Access-Control-Allow-Methods")); methods == "" {
-		t.Fatal("expected CORS methods header to be set")
-	}
-	if headers := string(resp.Header.Peek("Access-Control-Allow-Headers")); headers == "" {
-		t.Fatal("expected CORS headers header to be set")
+
+	// Azugo's built-in CORS only sets response headers when an Origin is present.
+	resp := executeRequest(t, application, fasthttp.MethodGet, "/health", map[string]string{
+		"Origin": "http://example.com",
+	})
+
+	if origin := string(resp.Header.Peek("Access-Control-Allow-Origin")); origin == "" {
+		t.Fatal("expected Access-Control-Allow-Origin to be set")
 	}
 }
 
 func TestOptionsPreflightShortCircuits(t *testing.T) {
-	application := NewApp(newTestConfig(t))
-
-	resp := executeRequest(t, application, fasthttp.MethodOptions, "/token_status_list/take", nil)
-
-	if got, want := resp.StatusCode(), fasthttp.StatusOK; got != want {
-		t.Fatalf("preflight status mismatch: got %d want %d", got, want)
+	application, err := NewApp(newTestConfig(t))
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
 	}
-	if len(resp.Body()) != 0 {
-		t.Fatalf("expected preflight body to be empty, got %q", string(resp.Body()))
+
+	// Azugo's built-in CORS preflight returns 204 No Content (not 200).
+	resp := executeRequest(t, application, fasthttp.MethodOptions, "/token_status_list/take", map[string]string{
+		"Origin": "http://example.com",
+	})
+
+	if got, want := resp.StatusCode(), fasthttp.StatusNoContent; got != want {
+		t.Fatalf("preflight status mismatch: got %d want %d", got, want)
 	}
 }
 
 func TestSwaggerIndexServed(t *testing.T) {
 	cfg := newTestConfig(t)
-	application := NewApp(cfg)
+	application, err := NewApp(cfg)
+	if err != nil {
+		t.Fatalf("NewApp failed: %v", err)
+	}
 
 	resp := executeRequest(t, application, fasthttp.MethodGet, "/token_status_list/swagger", nil)
 

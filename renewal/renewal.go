@@ -1,19 +1,3 @@
-/*
-Copyright (c) Gatis Beikerts
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package renewal
 
 import (
@@ -52,13 +36,6 @@ func (rs *RenewalService) RenewLists() error {
 	hostname, _ := os.Hostname()
 	log.Printf("Starting list renewal process on pod %s", hostname)
 
-	// Check if the status list directory exists
-	if _, err := os.Stat(rs.config.StatusListDir); os.IsNotExist(err) {
-		log.Printf("Error listing files: status list directory does not exist: %s", rs.config.StatusListDir)
-		return fmt.Errorf("status list directory does not exist: %s: %w", rs.config.StatusListDir, err)
-	}
-
-	// Create formatter for JWT/CWT generation
 	formatter := services.NewStatusListFormatter(rs.config)
 
 	// Use Storage.List to find all full_list.json files
@@ -183,17 +160,18 @@ func (rs *RenewalService) isListExpired(statusListData *models.StatusListData, d
 
 // renewTokenStatusList renews token status list files
 func (rs *RenewalService) renewTokenStatusList(dirPath string, statusListData *models.StatusListData, formatter *services.StatusListFormatter) error {
-	// Note: Backup functionality removed as it requires filesystem-specific operations
-	// In production, backups should be handled at the infrastructure level (S3 versioning, etc.)
+	expiryDate := ""
+	if statusListData.Expires != nil {
+		expiryDate = *statusListData.Expires
+	}
 
-	// Regenerate JWT
-	rs.generateAndWrite(dirPath, "token_status_list.jwt", func() (string, error) {
-		return formatter.GenerateJWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI)
+	rs.generateAndWrite(dirPath, "token_status_list.jwt", func() ([]byte, error) {
+		s, err := formatter.GenerateJWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI, expiryDate)
+		return []byte(s), err
 	}, "JWT")
 
-	// Regenerate CWT
-	rs.generateAndWrite(dirPath, "token_status_list.cwt", func() (string, error) {
-		return formatter.GenerateCWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI)
+	rs.generateAndWrite(dirPath, "token_status_list.cwt", func() ([]byte, error) {
+		return formatter.GenerateCWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI, expiryDate)
 	}, "CWT")
 
 	return nil
@@ -201,28 +179,28 @@ func (rs *RenewalService) renewTokenStatusList(dirPath string, statusListData *m
 
 // renewIdentifierList renews identifier list files
 func (rs *RenewalService) renewIdentifierList(dirPath string, statusListData *models.StatusListData, formatter *services.StatusListFormatter) error {
-	// Note: Backup functionality removed as it requires filesystem-specific operations
-	// In production, backups should be handled at the infrastructure level (S3 versioning, etc.)
+	expiryDate := ""
+	if statusListData.Expires != nil {
+		expiryDate = *statusListData.Expires
+	}
 
-	// Regenerate JWT
-	rs.generateAndWrite(dirPath, "identifier_list.jwt", func() (string, error) {
-		return formatter.GenerateIdentifierJWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI)
+	rs.generateAndWrite(dirPath, "identifier_list.jwt", func() ([]byte, error) {
+		s, err := formatter.GenerateIdentifierJWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI, expiryDate)
+		return []byte(s), err
 	}, "identifier JWT")
 
-	// Regenerate CWT
-	rs.generateAndWrite(dirPath, "identifier_list.cwt", func() (string, error) {
-		return formatter.GenerateIdentifierCWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI)
+	rs.generateAndWrite(dirPath, "identifier_list.cwt", func() ([]byte, error) {
+		return formatter.GenerateIdentifierCWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI, expiryDate)
 	}, "identifier CWT")
 
 	return nil
 }
 
 // generateAndWrite handles the pattern of generating content and writing it to a file
-// with appropriate error handling and logging
 func (rs *RenewalService) generateAndWrite(
 	dirPath string,
 	filename string,
-	generateFunc func() (string, error),
+	generateFunc func() ([]byte, error),
 	description string,
 ) {
 	content, err := generateFunc()
@@ -232,7 +210,7 @@ func (rs *RenewalService) generateAndWrite(
 	}
 
 	filePath := filepath.Join(dirPath, filename)
-	if err := rs.writeOrCreateFile(filePath, []byte(content)); err != nil {
+	if err := rs.writeOrCreateFile(filePath, content); err != nil {
 		if stdErrors.Is(err, errors.ErrNotFound) {
 			log.Printf("Directory %s no longer exists (cleaned up), skipping %s write", dirPath, description)
 		} else {

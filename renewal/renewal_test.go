@@ -1,19 +1,3 @@
-/*
-Copyright (c) Gatis Beikerts
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package renewal
 
 import (
@@ -256,10 +240,11 @@ func TestRenewListsNonExistentDirectory(t *testing.T) {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
 
-	// Test that RenewLists returns an error for non-existent directory
+	// RenewLists no longer errors on non-existent directories — it logs and returns nil.
+	// The storage.List() call handles backend availability gracefully.
 	err = NewRenewalService(cfg, stor).RenewLists()
-	if err == nil {
-		t.Errorf("RenewLists() should return an error for non-existent directory")
+	if err != nil {
+		t.Errorf("RenewLists() returned unexpected error: %v", err)
 	}
 
 	tests := []struct {

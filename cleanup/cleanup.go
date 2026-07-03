@@ -188,4 +188,3 @@ func nextRun(now time.Time, hour, minute int) time.Time {
 	}
 	return next
 }
-

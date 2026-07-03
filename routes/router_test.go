@@ -2,7 +2,6 @@ package routes
 
 import (
 	"encoding/json"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,7 +28,7 @@ const (
 func newTestConfig(t *testing.T) *appconfig.Config {
 	t.Helper()
 
-	tempDir, err := os.MkdirTemp("", "routes-test")
+	tempDir, err := os.MkdirTemp(".", ".routes-test-")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -475,10 +474,7 @@ func TestBuildSwaggerServers(t *testing.T) {
 		SwaggerURLPrefix: "",
 	}
 
-	r := httptest.NewRequest("GET", "http://localhost:8080/", nil)
-	r.Host = "localhost:8080"
-
-	servers := buildSwaggerServers(cfg, r)
+	servers := buildSwaggerServerValues(cfg, "", "", "", "localhost:8080")
 	if len(servers) != 1 {
 		t.Errorf("expected 1 server, got %d", len(servers))
 	}
@@ -488,7 +484,7 @@ func TestBuildSwaggerServers(t *testing.T) {
 
 	// Test with prefix
 	cfg.SwaggerURLPrefix = "/api"
-	servers = buildSwaggerServers(cfg, r)
+	servers = buildSwaggerServerValues(cfg, "", "", "", "localhost:8080")
 	if len(servers) != 1 {
 		t.Errorf("expected 1 server, got %d", len(servers))
 	}
@@ -499,10 +495,7 @@ func TestBuildSwaggerServers(t *testing.T) {
 
 	// Test with forwarded headers (no prefix)
 	cfg.SwaggerURLPrefix = ""
-	r.Header.Set("X-Forwarded-Prefix", "/proxy")
-	r.Header.Set("X-Forwarded-Host", "example.com")
-	r.Header.Set("X-Forwarded-Proto", "https")
-	servers = buildSwaggerServers(cfg, r)
+	servers = buildSwaggerServerValues(cfg, "/proxy", "https", "example.com", "localhost:8080")
 	if len(servers) != 2 {
 		t.Errorf("expected 2 servers with forwarded headers, got %d", len(servers))
 	}
@@ -512,19 +505,14 @@ func TestBuildSwaggerServers(t *testing.T) {
 }
 
 func TestForwardedURL(t *testing.T) {
-	r := httptest.NewRequest("GET", "http://example.com/", nil)
-	r.Header.Set("X-Forwarded-Host", "example.com")
-	r.Header.Set("X-Forwarded-Proto", "https")
-
-	url := forwardedURL("/api", r)
+	url := buildForwardedURL("/api", "https", "example.com", "localhost:8080")
 	expected := "https://example.com/api/"
 	if url != expected {
 		t.Errorf("expected %s, got %s", expected, url)
 	}
 
 	// Test without proto header
-	r.Header.Del("X-Forwarded-Proto")
-	url = forwardedURL("/api", r)
+	url = buildForwardedURL("/api", "", "example.com", "localhost:8080")
 	expected = "http://example.com/api/"
 	if url != expected {
 		t.Errorf("expected %s, got %s", expected, url)

@@ -1,19 +1,3 @@
-/*
-Copyright (c) Gatis Beikerts
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package services
 
 import (
@@ -180,8 +164,12 @@ func (lm *ListManager) saveFormatFiles(statusListData *models.StatusListData, co
 
 // saveTokenStatusListFormats generates and saves JWT and CWT for token status list
 func (lm *ListManager) saveTokenStatusListFormats(statusListData *models.StatusListData, country, doctype, rand, statusListURI string) error {
-	// Generate and save JWT
-	jwtContent, err := lm.generateJWTFormat(statusListData.TokenStatusList, country, statusListURI)
+	expiryDate := ""
+	if statusListData.Expires != nil {
+		expiryDate = *statusListData.Expires
+	}
+
+	jwtContent, err := lm.generateJWTFormat(statusListData.TokenStatusList, country, statusListURI, expiryDate)
 	if err != nil {
 		log.Printf("Failed to generate JWT: %v", err)
 	} else {
@@ -191,13 +179,12 @@ func (lm *ListManager) saveTokenStatusListFormats(statusListData *models.StatusL
 		}
 	}
 
-	// Generate and save CWT
-	cwtContent, err := lm.generateCWTFormat(statusListData.TokenStatusList, country, statusListURI)
+	cwtContent, err := lm.generateCWTFormat(statusListData.TokenStatusList, country, statusListURI, expiryDate)
 	if err != nil {
 		log.Printf("Failed to generate CWT: %v", err)
 	} else {
 		cwtPath := filepath.Join("token_status_list", country, doctype, rand, "token_status_list.cwt")
-		if err := lm.writeOrCreateFile(cwtPath, []byte(cwtContent)); err != nil {
+		if err := lm.writeOrCreateFile(cwtPath, cwtContent); err != nil {
 			return fmt.Errorf("failed to save CWT: %w", err)
 		}
 	}
@@ -207,8 +194,12 @@ func (lm *ListManager) saveTokenStatusListFormats(statusListData *models.StatusL
 
 // saveIdentifierListFormats generates and saves JWT and CWT for identifier list
 func (lm *ListManager) saveIdentifierListFormats(statusListData *models.StatusListData, country, doctype, rand, identifierListURI string) error {
-	// Generate and save identifier JWT
-	identifierJWTContent, err := lm.generateIdentifierJWTFormat(statusListData.IdentifierList, country, identifierListURI)
+	expiryDate := ""
+	if statusListData.Expires != nil {
+		expiryDate = *statusListData.Expires
+	}
+
+	identifierJWTContent, err := lm.generateIdentifierJWTFormat(statusListData.IdentifierList, country, identifierListURI, expiryDate)
 	if err != nil {
 		log.Printf("Failed to generate identifier JWT: %v", err)
 	} else {
@@ -218,13 +209,12 @@ func (lm *ListManager) saveIdentifierListFormats(statusListData *models.StatusLi
 		}
 	}
 
-	// Generate and save identifier CWT
-	identifierCWTContent, err := lm.generateIdentifierCWTFormat(statusListData.IdentifierList, country, identifierListURI)
+	identifierCWTContent, err := lm.generateIdentifierCWTFormat(statusListData.IdentifierList, country, identifierListURI, expiryDate)
 	if err != nil {
 		log.Printf("Failed to generate identifier CWT: %v", err)
 	} else {
 		identifierCWTPath := filepath.Join("identifier_list", country, doctype, rand, "identifier_list.cwt")
-		if err := lm.writeOrCreateFile(identifierCWTPath, []byte(identifierCWTContent)); err != nil {
+		if err := lm.writeOrCreateFile(identifierCWTPath, identifierCWTContent); err != nil {
 			return fmt.Errorf("failed to save identifier CWT: %w", err)
 		}
 	}
@@ -449,26 +439,25 @@ func (lm *ListManager) SetStatus(uri, country, doctype, listID string, index, st
 }
 
 // generateJWTFormat generates JWT format
-func (lm *ListManager) generateJWTFormat(tokenStatusList *models.IssuerStatusList, country, listURL string) (string, error) {
+func (lm *ListManager) generateJWTFormat(tokenStatusList *models.IssuerStatusList, country, listURL, expiryDate string) (string, error) {
 	formatter := NewStatusListFormatter(lm.config)
-	return formatter.GenerateJWT(tokenStatusList, country, listURL)
+	return formatter.GenerateJWT(tokenStatusList, country, listURL, expiryDate)
 }
 
 // generateCWTFormat generates CWT format
-func (lm *ListManager) generateCWTFormat(tokenStatusList *models.IssuerStatusList, country, listURL string) (string, error) {
+func (lm *ListManager) generateCWTFormat(tokenStatusList *models.IssuerStatusList, country, listURL, expiryDate string) ([]byte, error) {
 	formatter := NewStatusListFormatter(lm.config)
-	return formatter.GenerateCWT(tokenStatusList, country, listURL)
+	return formatter.GenerateCWT(tokenStatusList, country, listURL, expiryDate)
 }
 
 // generateIdentifierJWTFormat generates identifier JWT format
-func (lm *ListManager) generateIdentifierJWTFormat(identifierList map[string]int, country, listURL string) (string, error) {
+func (lm *ListManager) generateIdentifierJWTFormat(identifierList map[string]int, country, listURL, expiryDate string) (string, error) {
 	formatter := NewStatusListFormatter(lm.config)
-	return formatter.GenerateIdentifierJWT(identifierList, country, listURL)
+	return formatter.GenerateIdentifierJWT(identifierList, country, listURL, expiryDate)
 }
 
 // generateIdentifierCWTFormat generates identifier CWT format
-func (lm *ListManager) generateIdentifierCWTFormat(identifierList map[string]int, country, listURL string) (string, error) {
+func (lm *ListManager) generateIdentifierCWTFormat(identifierList map[string]int, country, listURL, expiryDate string) ([]byte, error) {
 	formatter := NewStatusListFormatter(lm.config)
-	return formatter.GenerateIdentifierCWT(identifierList, country, listURL)
+	return formatter.GenerateIdentifierCWT(identifierList, country, listURL, expiryDate)
 }
-
