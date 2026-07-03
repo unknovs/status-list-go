@@ -75,6 +75,37 @@ func TestCleanupExpiredListsLocalStorage(t *testing.T) {
 	}
 }
 
+func TestHasExpired(t *testing.T) {
+	// Expiry date is the last valid day (inclusive), so a list must survive all of its
+	// expiry day and only be considered expired once now is past the end of that day.
+	now := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
+
+	strPtr := func(s string) *string { return &s }
+
+	tests := []struct {
+		name    string
+		expires *string
+		want    bool
+	}{
+		{name: "nil expiry never expires", expires: nil, want: false},
+		{name: "expires today is still valid", expires: strPtr("2026-06-26"), want: false},
+		{name: "expired yesterday", expires: strPtr("2026-06-25"), want: true},
+		{name: "expires tomorrow", expires: strPtr("2026-06-27"), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := hasExpired(&models.StatusListData{Expires: tt.expires}, now)
+			if err != nil {
+				t.Fatalf("hasExpired returned error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("hasExpired = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func createFullList(t *testing.T, baseDir, relativePath, expiry string) {
 	t.Helper()
 

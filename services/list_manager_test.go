@@ -610,6 +610,104 @@ func TestSetStatus(t *testing.T) {
 	}
 }
 
+// conflictInjectingStorage wraps MockStorage and forces the next N versioned writes to
+// fail with ErrVersionMismatch, simulating a concurrent revocation that won the race.
+type conflictInjectingStorage struct {
+	*MockStorage
+	writeFailures int
+}
+
+func (c *conflictInjectingStorage) Write(path string, content []byte, version int) error {
+	if c.writeFailures > 0 {
+		c.writeFailures--
+		return fmt.Errorf("failed to update JSON: %w", localerrors.ErrVersionMismatch)
+	}
+
+	return c.MockStorage.Write(path, content, version)
+}
+
+// TestSetStatusRetriesOnVersionMismatch verifies that a version conflict during persist is
+// retried with a fresh load instead of being silently dropped (finding 5.1).
+func TestSetStatusRetriesOnVersionMismatch(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 100,
+		CountryCode:         "DE",
+	}
+	stor := &conflictInjectingStorage{MockStorage: NewMockStorage()}
+	lm := NewListManager(cfg, stor)
+
+	country := "DE"
+	doctype := "mDL"
+	lm.NewList(country, doctype)
+
+	statusData := lm.statusList[country][doctype]
+	listID := statusData.Rand
+
+	if err := lm.DumpList(statusData, country, doctype); err != nil {
+		t.Fatalf("DumpList failed: %v", err)
+	}
+
+	uri := fmt.Sprintf("http://localhost:8081/token_status_list/%s/%s/%s", country, doctype, listID)
+
+	// Force the first persisted write to conflict; SetStatus must reload and retry.
+	stor.writeFailures = 1
+
+	if err := lm.SetStatus(uri, country, doctype, listID, 10, 1); err != nil {
+		t.Fatalf("SetStatus should retry past a version conflict, got: %v", err)
+	}
+
+	if stor.writeFailures != 0 {
+		t.Fatalf("expected injected conflict to be consumed, %d remaining", stor.writeFailures)
+	}
+
+	status, err := lm.GetStatusFromURI(uri, 10)
+	if err != nil {
+		t.Fatalf("GetStatusFromURI failed: %v", err)
+	}
+
+	if status != 1 {
+		t.Errorf("expected status 1 after retry, got %d", status)
+	}
+}
+
+// TestSetStatusFailsAfterPersistentConflict verifies that a conflict on every attempt
+// surfaces an error rather than looping forever or reporting false success (finding 5.1).
+func TestSetStatusFailsAfterPersistentConflict(t *testing.T) {
+	cfg := &config.Config{
+		ServiceURL:          "http://localhost:8081/",
+		TokenStatusListSize: 100,
+		CountryCode:         "DE",
+	}
+	stor := &conflictInjectingStorage{MockStorage: NewMockStorage()}
+	lm := NewListManager(cfg, stor)
+
+	country := "DE"
+	doctype := "mDL"
+	lm.NewList(country, doctype)
+
+	statusData := lm.statusList[country][doctype]
+	listID := statusData.Rand
+
+	if err := lm.DumpList(statusData, country, doctype); err != nil {
+		t.Fatalf("DumpList failed: %v", err)
+	}
+
+	uri := fmt.Sprintf("http://localhost:8081/token_status_list/%s/%s/%s", country, doctype, listID)
+
+	// Conflict on every attempt (more than maxAttempts).
+	stor.writeFailures = 100
+
+	err := lm.SetStatus(uri, country, doctype, listID, 10, 1)
+	if err == nil {
+		t.Fatal("expected SetStatus to fail after exhausting retries")
+	}
+
+	if !stdErrors.Is(err, localerrors.ErrVersionMismatch) {
+		t.Errorf("expected wrapped ErrVersionMismatch, got: %v", err)
+	}
+}
+
 // TestConcurrentAccess tests concurrent access to ListManager
 func TestConcurrentAccess(t *testing.T) {
 	cfg := &config.Config{

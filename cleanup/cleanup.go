@@ -178,7 +178,13 @@ func hasExpired(statusList *models.StatusListData, now time.Time) (bool, error) 
 		return false, fmt.Errorf("parse expiry %q: %w", *statusList.Expires, err)
 	}
 
-	return expiresAt.Before(now), nil
+	// The expiry date is the last valid day (inclusive), matching validateExpiryDate in
+	// the handler. Parsing yields 00:00:00 UTC of that day, so the list is only expired
+	// once now is past the END of the day; advance to the start of the following day
+	// before comparing to avoid deleting lists a full day early.
+	expiresAt = expiresAt.Add(24 * time.Hour)
+
+	return !now.Before(expiresAt), nil
 }
 
 func (s *Service) deleteIdentifierDir(tokenDir string) error {
