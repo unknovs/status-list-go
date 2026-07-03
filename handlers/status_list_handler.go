@@ -51,6 +51,7 @@ func formStr(ctx *azugo.Context, key string) string {
 	if v := ctx.Form.StringOptional(key); v != nil {
 		return *v
 	}
+
 	return ""
 }
 
@@ -89,9 +90,11 @@ func (h *StatusListHandler) GetIndex(ctx *azugo.Context) {
 	if v := ctx.Query.StringOptional("uri"); v != nil {
 		uri = *v
 	}
+
 	if v := ctx.Query.StringOptional("idx"); v != nil {
 		idx = *v
 	}
+
 	if idx == "" {
 		if v := ctx.Query.StringOptional("id"); v != nil {
 			idx = *v
@@ -128,10 +131,12 @@ func (h *StatusListHandler) GetIndex(ctx *azugo.Context) {
 // SetIndex handles the set index request
 func (h *StatusListHandler) SetIndex(ctx *azugo.Context) {
 	uri := formStr(ctx, "uri")
+
 	idx := formStr(ctx, "idx")
 	if idx == "" {
 		idx = formStr(ctx, "id")
 	}
+
 	statusStr := formStr(ctx, "status")
 
 	if uri == "" || idx == "" || statusStr == "" {
@@ -194,7 +199,7 @@ func (h *StatusListHandler) SetIndex(ctx *azugo.Context) {
 	}
 
 	ctx.Header.Set("Content-Type", "text/plain")
-	ctx.Text(fmt.Sprintf("Status Changed\n"))
+	ctx.Text("Status Changed\n")
 }
 
 func validateExpiryDate(expiryDate string) error {

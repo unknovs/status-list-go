@@ -56,9 +56,11 @@ func newS3Storage(cfg *config.Config) (Storage, error) {
 	if cfg.S3Bucket == "" {
 		return nil, errors.New("S3_BUCKET is required for S3 storage")
 	}
+
 	if cfg.S3AccessKeyID == "" {
 		return nil, errors.New("S3_ACCESS_KEY_ID is required for S3 storage")
 	}
+
 	if cfg.S3SecretAccessKey == "" {
 		return nil, errors.New("S3_SECRET_ACCESS_KEY is required for S3 storage")
 	}

@@ -20,8 +20,8 @@ import (
 	"os"
 	"strings"
 
-	pkgconfig "github.com/gmb-lib/go-platform-kit/config"
 	"azugo.io/core/validation"
+	pkgconfig "github.com/gmb-lib/go-platform-kit/config"
 	"github.com/spf13/viper"
 )
 
@@ -186,6 +186,7 @@ func normalizeHour(value int) int {
 	if value < 0 || value > 23 {
 		return 2
 	}
+
 	return value
 }
 
@@ -193,19 +194,23 @@ func normalizeMinute(value int) int {
 	if value < 0 || value > 59 {
 		return 0
 	}
+
 	return value
 }
 
 func parseAllowedDoctypes(raw string) map[string]bool {
 	result := make(map[string]bool)
+
 	if raw != "" {
 		for _, item := range strings.Split(raw, ",") {
 			if t := strings.TrimSpace(item); t != "" {
 				result[t] = true
 			}
 		}
+
 		return result
 	}
+
 	return map[string]bool{
 		"eu.europa.ec.eudi.ehic.1":    true,
 		"eu.europa.ec.eudi.hiid.1":    true,

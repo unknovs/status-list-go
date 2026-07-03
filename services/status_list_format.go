@@ -106,6 +106,7 @@ func (f *StatusListFormatter) GenerateJWT(tokenStatusList *models.IssuerStatusLi
 	if err != nil {
 		return "", fmt.Errorf("invalid expiry date: %w", err)
 	}
+
 	claims := JWTClaims{
 		StatusList: map[string]interface{}{
 			"bits": 1,
@@ -155,6 +156,7 @@ func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusLi
 	if issuer == "" {
 		return nil, ErrServiceURLEmpty
 	}
+
 	issuer = strings.TrimSuffix(issuer, "/")
 
 	expiry, err := time.Parse("2006-01-02", expiryDate)
@@ -163,10 +165,10 @@ func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusLi
 	}
 
 	claims := map[interface{}]interface{}{
-		1: issuer,          // iss
-		2: listURL,         // sub
-		4: expiry.Unix(),   // exp
-		6: now.Unix(),      // iat
+		1: issuer,        // iss
+		2: listURL,       // sub
+		4: expiry.Unix(), // exp
+		6: now.Unix(),    // iat
 		65534: map[string]interface{}{
 			"bits": 1,
 			"lst":  base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(tokenStatusList.StatusList.Compressed()),
@@ -232,6 +234,7 @@ func (f *StatusListFormatter) GenerateIdentifierJWT(identifierList map[string]in
 	if issuer == "" {
 		return "", ErrServiceURLEmpty
 	}
+
 	issuer = strings.TrimSuffix(issuer, "/")
 
 	expiry, err := time.Parse("2006-01-02", expiryDate)
@@ -285,6 +288,7 @@ func (f *StatusListFormatter) GenerateIdentifierCWT(identifierList map[string]in
 	if issuer == "" {
 		return nil, ErrServiceURLEmpty
 	}
+
 	issuer = strings.TrimSuffix(issuer, "/")
 
 	expiry, err := time.Parse("2006-01-02", expiryDate)
@@ -376,6 +380,7 @@ func (f *StatusListFormatter) loadPrivateKey(keyPath string) (*ecdsa.PrivateKey,
 // findPrivateKeyPEMBlock finds the first private key PEM block in the data
 func (f *StatusListFormatter) findPrivateKeyPEMBlock(keyData []byte) (*pem.Block, error) {
 	var block *pem.Block
+
 	remaining := keyData
 
 	for {

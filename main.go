@@ -90,12 +90,13 @@ func performHealthCheck() {
 	}
 
 	client := &http.Client{Timeout: 5 * time.Second}
+
 	resp, err := client.Get(serviceURL + "/health")
 	if err != nil {
 		fmt.Printf("Health check failed: %v\n", err)
 		os.Exit(1)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		fmt.Printf("Health check failed: HTTP %d\n", resp.StatusCode)

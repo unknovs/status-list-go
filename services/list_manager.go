@@ -121,6 +121,7 @@ func (lm *ListManager) saveJSONFiles(country, doctype, rand string, jsonData []b
 	}
 
 	identifierJSONPath := filepath.Join("identifier_list", country, doctype, rand, FullListJSONFile)
+
 	return lm.saveJSONFile(identifierJSONPath, jsonData, "identifier")
 }
 
@@ -136,6 +137,7 @@ func (lm *ListManager) saveJSONFile(path string, jsonData []byte, fileType strin
 		if err != nil {
 			return fmt.Errorf("failed to get %s file version: %w", fileType, err)
 		}
+
 		if err := lm.storage.Write(path, jsonData, currentVersion+1); err != nil {
 			return fmt.Errorf("failed to update %s JSON: %w", fileType, err)
 		}
@@ -153,6 +155,7 @@ func (lm *ListManager) buildURIs(country, doctype, rand string) (string, string)
 	baseURL := strings.TrimSuffix(lm.config.ServiceURL, "/") + "/"
 	statusListURI := baseURL + fmt.Sprintf("token_status_list/%s/%s/%s", country, doctype, rand)
 	identifierListURI := baseURL + fmt.Sprintf("identifier_list/%s/%s/%s", country, doctype, rand)
+
 	return statusListURI, identifierListURI
 }
 
@@ -240,6 +243,7 @@ func (lm *ListManager) writeOrCreateFile(path string, content []byte) error {
 		if err != nil {
 			return fmt.Errorf("failed to get current version: %w", err)
 		}
+
 		return lm.storage.Write(path, content, currentVersion+1)
 	}
 
@@ -266,6 +270,7 @@ func (lm *ListManager) LoadList(uri string) (*models.StatusListData, error) {
 			}
 		}
 	}
+
 	folderPath := filepath.Join(relativePath, FullListJSONFile)
 
 	jsonData, err := lm.storage.Read(folderPath)
@@ -331,6 +336,7 @@ func (lm *ListManager) TakeIndexList(country, doctype, expiryDate string) (int, 
 		statusListData.Expires = &expiryDate
 	} else {
 		currentExp, _ := time.Parse("2006-01-02", *statusListData.Expires)
+
 		newExp, _ := time.Parse("2006-01-02", expiryDate)
 		if newExp.After(currentExp) {
 			statusListData.Expires = &expiryDate
@@ -352,13 +358,16 @@ func (lm *ListManager) GenerateStatusListInfo(country, doctype, expiryDate strin
 	}
 
 	lm.mutex.RLock()
+
 	statusListData := lm.statusList[country][doctype]
 	if statusListData == nil {
 		lm.mutex.RUnlock()
 		return nil, fmt.Errorf("list not found in memory after allocation for %s/%s", country, doctype)
 	}
+
 	statusListURI := statusListData.StatusListURI
 	identifierListURI := statusListData.IdentifierListURI
+
 	lm.mutex.RUnlock()
 
 	statusListInfo := &models.StatusListInfo{}
@@ -383,6 +392,7 @@ func (lm *ListManager) GetStatusFromURI(uri string, index int) (int, error) {
 		if status, exists := tempList.IdentifierList[fmt.Sprintf("%d", index)]; exists {
 			return status, nil
 		}
+
 		return 0, nil
 	}
 
@@ -405,9 +415,11 @@ func (lm *ListManager) SetStatus(uri, country, doctype, listID string, index, st
 	if lm.statusList[country] != nil && lm.statusList[country][doctype] != nil &&
 		lm.statusList[country][doctype].Rand == listID {
 		lm.statusList[country][doctype].TokenStatusList.StatusList.Set(index, status)
+
 		if lm.statusList[country][doctype].IdentifierList == nil {
 			lm.statusList[country][doctype].IdentifierList = make(map[string]int)
 		}
+
 		lm.statusList[country][doctype].IdentifierList[fmt.Sprintf("%d", index)] = status
 	}
 	lm.mutex.Unlock()

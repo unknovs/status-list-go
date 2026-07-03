@@ -739,7 +739,7 @@ func TestWriteOrCreateFileNewFile(t *testing.T) {
 	}
 
 	rs := &RenewalService{
-		logger: zap.NewNop(),
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -780,7 +780,7 @@ func TestWriteOrCreateFileVersionConflictRetry(t *testing.T) {
 	}
 
 	rs := &RenewalService{
-		logger: zap.NewNop(),
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -833,7 +833,7 @@ func TestWriteOrCreateFileMaxRetriesExceeded(t *testing.T) {
 	}
 
 	rs := &RenewalService{
-		logger: zap.NewNop(),
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -871,7 +871,7 @@ func TestWriteOrCreateFileFileDeletedDuringOperation(t *testing.T) {
 	}
 
 	rs := &RenewalService{
-		logger: zap.NewNop(),
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -902,7 +902,7 @@ func TestWriteOrCreateFileGetVersionFailsWithNoSuchKey(t *testing.T) {
 	}
 
 	rs := &RenewalService{
-		logger: zap.NewNop(),
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -947,7 +947,7 @@ func TestWriteOrCreateFileNonVersionMismatchError(t *testing.T) {
 	}
 
 	rs := &RenewalService{
-		logger: zap.NewNop(),
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -988,7 +988,7 @@ func TestProcessListFileFileNotFound(t *testing.T) {
 	}
 
 	rs := &RenewalService{
-		logger: zap.NewNop(),
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -1018,7 +1018,7 @@ func TestRenewTokenStatusListDirectoryDeletedDuringWrite(t *testing.T) {
 	}
 
 	rs := &RenewalService{
-		logger: zap.NewNop(),
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -1050,7 +1050,7 @@ func TestRenewIdentifierListDirectoryDeletedDuringWrite(t *testing.T) {
 	}
 
 	rs := &RenewalService{
-		logger: zap.NewNop(),
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}

@@ -22,8 +22,8 @@ import (
 
 	"azugo.io/azugo"
 	"azugo.io/azugo/server"
-	"github.com/gmb-lib/go-platform-kit/platform"
 	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
+	"github.com/gmb-lib/go-platform-kit/platform"
 	"github.com/spf13/cobra"
 
 	"github.com/unknovs/status-list-go/config"
@@ -98,6 +98,7 @@ func ensureDirs(cfg *config.Config) error {
 			return fmt.Errorf("create directory %s: %w", dir, err)
 		}
 	}
+
 	return nil
 }
 

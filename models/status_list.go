@@ -84,11 +84,14 @@ func (sl *StatusList) Get(index int) int {
 	if index >= sl.size {
 		return 0
 	}
+
 	byteIndex := index / 8
 	bitIndex := index % 8
+
 	if byteIndex >= len(sl.data) {
 		return 0
 	}
+
 	return int((sl.data[byteIndex] >> bitIndex) & 1)
 }
 
@@ -97,6 +100,7 @@ func (sl *StatusList) Set(index, value int) {
 	if index >= sl.size {
 		return
 	}
+
 	byteIndex := index / 8
 	bitIndex := index % 8
 
@@ -116,6 +120,7 @@ func (sl *StatusList) Set(index, value int) {
 // as required by RFC draft-ietf-oauth-status-list-02 Section 4
 func (sl *StatusList) Compressed() []byte {
 	var buf bytes.Buffer
+
 	zw := zlib.NewWriter(&buf)
 
 	logFallback := func(stage string, err error) []byte {
@@ -127,9 +132,11 @@ func (sl *StatusList) Compressed() []byte {
 	if err != nil {
 		return logFallback("write", err)
 	}
+
 	if err := zw.Close(); err != nil {
 		return logFallback("close", err)
 	}
+
 	return buf.Bytes()
 }
 
@@ -169,6 +176,7 @@ func (a *Allocator) Take() (int, error) {
 
 	index := a.indices[a.usedCount]
 	a.usedCount++
+
 	return index, nil
 }
 
@@ -306,5 +314,6 @@ func (isl *IssuerStatusList) UnmarshalJSON(data []byte) error {
 	}
 
 	*isl = *loaded
+
 	return nil
 }

@@ -72,6 +72,7 @@ func (rs *RenewalService) RenewLists() error {
 	}
 
 	rs.logger.Info("list renewal process completed")
+
 	return nil
 }
 
@@ -139,7 +140,9 @@ func (rs *RenewalService) handleReadError(err error, filePath string) bool {
 		rs.logger.Debug("file no longer exists, skipping", zap.String("file", filePath))
 		return true
 	}
+
 	rs.logger.Error("error reading file", zap.String("file", filePath), zap.Error(err))
+
 	return true
 }
 
@@ -149,6 +152,7 @@ func (rs *RenewalService) hasRequiredURIs(statusListData *models.StatusListData,
 		rs.logger.Warn("URIs missing in file", zap.String("file", filePath))
 		return false
 	}
+
 	return true
 }
 
@@ -273,6 +277,7 @@ func (rs *RenewalService) performWriteAttempt(path string, content []byte, attem
 	if err != nil {
 		return writeAttemptResult{shouldReturn: true, err: err}
 	}
+
 	if !exists {
 		return writeAttemptResult{shouldReturn: true, err: nil}
 	}
@@ -282,6 +287,7 @@ func (rs *RenewalService) performWriteAttempt(path string, content []byte, attem
 		if stdErrors.Is(err, errors.ErrNotFound) {
 			return writeAttemptResult{shouldReturn: true, err: nil}
 		}
+
 		return writeAttemptResult{shouldReturn: true, err: err}
 	}
 
@@ -290,6 +296,7 @@ func (rs *RenewalService) performWriteAttempt(path string, content []byte, attem
 		if attempt > 1 {
 			rs.logger.Debug("successfully wrote file after retries", zap.String("file", path), zap.Int("attempts", attempt))
 		}
+
 		return writeAttemptResult{shouldReturn: true, err: nil}
 	}
 
@@ -325,8 +332,10 @@ func (rs *RenewalService) getCurrentVersion(path string) (int, error) {
 			rs.logger.Debug("file deleted during operation, skipping write", zap.String("file", path))
 			return 0, errors.ErrNotFound
 		}
+
 		return 0, fmt.Errorf("failed to get current version: %w", err)
 	}
+
 	return currentVersion, nil
 }
 
@@ -347,6 +356,7 @@ func (rs *RenewalService) handleWriteError(err error, path string, attempt, maxR
 
 	rs.logger.Debug("version conflict, retrying", zap.String("file", path), zap.Int("attempt", attempt), zap.Int("maxRetries", maxRetries))
 	time.Sleep(time.Millisecond * 100 * time.Duration(attempt))
+
 	return true, nil
 }
 
@@ -378,6 +388,7 @@ func nextRun(now time.Time, hour, minute int) time.Time {
 	if now.After(today) || now.Equal(today) {
 		return today.Add(24 * time.Hour)
 	}
+
 	return today
 }
 

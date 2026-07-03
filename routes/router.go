@@ -24,8 +24,8 @@ import (
 	"strings"
 
 	"azugo.io/azugo"
-	"github.com/valyala/fasthttp"
 	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
+	"github.com/valyala/fasthttp"
 
 	"github.com/unknovs/status-list-go/config"
 	localerrors "github.com/unknovs/status-list-go/errors"
@@ -48,10 +48,12 @@ func Init(app *azugo.App, cfg *config.Config, handler *handlers.StatusListHandle
 		internal.Post("/take", handler.TakeIndex)
 		internal.Post("/set", handler.SetIndex)
 	}
+
 	app.Get(prefix("/token_status_list/get"), handler.GetIndex)
 	app.Get(prefix("/token_status_list/{country}/{doctype}/{id}"), handler.ServeStatusList)
 
 	staticDir := resolveStaticDir()
+
 	app.Get(prefix("/token_status_list/static/{path:*}"), func(ctx *azugo.Context) {
 		serveStaticFile(ctx, staticDir, prefix("/token_status_list/static/"))
 	})
@@ -77,12 +79,14 @@ func Init(app *azugo.App, cfg *config.Config, handler *handlers.StatusListHandle
 	if basePath != "" {
 		app.Get("/token_status_list/get", handler.GetIndex)
 		app.Get("/token_status_list/{country}/{doctype}/{id}", handler.ServeStatusList)
+
 		if !isPublicMode {
 			fb := app.Group("/token_status_list")
 			fb.Use(apiKeyMiddleware(cfg.APIKey))
 			fb.Post("/take", handler.TakeIndex)
 			fb.Post("/set", handler.SetIndex)
 		}
+
 		app.Get("/health", func(ctx *azugo.Context) {
 			ctx.SkipRequestLog()
 			ctx.StatusCode(fasthttp.StatusOK)
@@ -102,6 +106,7 @@ func determineServiceMode(cfg *config.Config) bool {
 	if mode == "" {
 		mode = "internal"
 	}
+
 	return mode == "public"
 }
 
@@ -110,6 +115,7 @@ func createPrefixFunc(basePath string) func(string) string {
 		if basePath != "" && !strings.HasPrefix(path, basePath) {
 			return basePath + path
 		}
+
 		return path
 	}
 }
@@ -173,11 +179,13 @@ func serveSwaggerJSON(ctx *azugo.Context, cfg *config.Config) {
 	swaggerPath, paths := locateSwaggerFile()
 	if swaggerPath == "" {
 		msg := "swagger.json not found. Paths tried: " + strings.Join(paths, ", ")
+
 		ctx.StatusCode(fasthttp.StatusNotFound)
 		ctx.Header.Set("Content-Type", "application/json")
 		ctx.JSON(localerrors.ErrorResponse{
 			Error: localerrors.ErrorDetail{Code: localerrors.ErrListNotFound, Message: msg},
 		})
+
 		return
 	}
 
@@ -188,6 +196,7 @@ func serveSwaggerJSON(ctx *azugo.Context, cfg *config.Config) {
 		ctx.JSON(localerrors.ErrorResponse{
 			Error: localerrors.ErrorDetail{Code: localerrors.ErrInternalServer, Message: err.Error()},
 		})
+
 		return
 	}
 
@@ -211,11 +220,13 @@ func locateSwaggerFile() (string, []string) {
 	if execDir, err := os.Executable(); err == nil {
 		paths = append(paths, filepath.Join(filepath.Dir(execDir), "static", "swagger.json"))
 	}
+
 	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil {
 			return p, paths
 		}
 	}
+
 	return "", paths
 }
 
@@ -224,10 +235,12 @@ func readSwagger(path string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read swagger.json: %w", err)
 	}
+
 	var doc map[string]interface{}
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("failed to parse swagger.json: %w", err)
 	}
+
 	return doc, nil
 }
 
@@ -244,17 +257,21 @@ func buildSwaggerServers(cfg *config.Config, ctx *azugo.Context) []map[string]in
 func buildSwaggerServerValues(cfg *config.Config, forwardedPrefix, forwardedProto, forwardedHost, host string) []map[string]interface{} {
 	if prefix := cfg.SwaggerURLPrefix; prefix != "" {
 		baseURL := strings.TrimSuffix(cfg.ServiceURL, "/")
+
 		if !strings.HasPrefix(prefix, "/") {
 			prefix = "/" + prefix
 		}
+
 		return []map[string]interface{}{{"url": baseURL + prefix + "/"}}
 	}
 
 	if basePath := cfg.BasePath; basePath != "" {
 		baseURL := strings.TrimSuffix(cfg.ServiceURL, "/")
+
 		if !strings.HasPrefix(basePath, "/") {
 			basePath = "/" + basePath
 		}
+
 		return []map[string]interface{}{{"url": baseURL + basePath + "/"}}
 	}
 
@@ -265,10 +282,6 @@ func buildSwaggerServerValues(cfg *config.Config, forwardedPrefix, forwardedProt
 	}
 
 	return servers
-}
-
-func forwardedURL(prefix string, ctx *azugo.Context) string {
-	return buildForwardedURL(prefix, ctx.Header.Get("X-Forwarded-Proto"), ctx.Header.Get("X-Forwarded-Host"), ctx.Host())
 }
 
 func buildForwardedURL(prefix, forwardedProto, forwardedHost, host string) string {
@@ -294,11 +307,13 @@ func resolveStaticDir() string {
 	if execDir, err := os.Executable(); err == nil {
 		candidates = append(candidates, filepath.Join(filepath.Dir(execDir), "static"))
 	}
+
 	for _, dir := range candidates {
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
 			return dir
 		}
 	}
+
 	return candidates[0]
 }
 
@@ -310,6 +325,7 @@ func apiKeyMiddleware(apiKey string) azugo.RequestHandlerFunc {
 				ctx.Error(pkerrors.HTTP("request", "unauthorized"))
 				return
 			}
+
 			next(ctx)
 		}
 	}

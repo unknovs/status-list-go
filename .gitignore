@@ -1,17 +1,39 @@
+# Binaries for programs and plugins
 *.exe
-temp/
-*.log
-RCA.md
-.env*
+*.exe~
+*.dll
+*.so
+*.dylib
+__debug_bin
 
-# Go build artifacts
+# Test binary, built with `go test -c`
 *.test
-*.out
-vendor/
 
-# IDE and OS
-.DS_Store
-Thumbs.db
-*.swp
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+report.json
+
+/server
+/publish
+.env
+
+node_modules
+/openapi/openapi.json
+/openapi/public/**
+!/openapi/public/*/index.html
+
 .idea
+.github
+.vscode
+.cert
+/logs
+
+# Default ignored files
+/shelf/
+/workspace.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
 /graphify-out

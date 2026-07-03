@@ -100,7 +100,9 @@ func (s *Service) cleanupExpiredLists() (int, error) {
 	}
 
 	now := time.Now().UTC()
+
 	var errs []error
+
 	deleted := 0
 
 	for _, filePath := range paths {
@@ -114,7 +116,9 @@ func (s *Service) cleanupExpiredLists() (int, error) {
 				s.logger.Debug("file already removed (concurrent cleanup?), skipping", zap.String("file", filePath))
 				continue
 			}
+
 			errs = append(errs, loadErr)
+
 			continue
 		}
 
@@ -194,6 +198,7 @@ func valueOrUnknown(value *string) string {
 	if value == nil {
 		return "unknown"
 	}
+
 	return *value
 }
 
@@ -202,5 +207,6 @@ func nextRun(now time.Time, hour, minute int) time.Time {
 	if !next.After(now) {
 		next = next.Add(24 * time.Hour)
 	}
+
 	return next
 }

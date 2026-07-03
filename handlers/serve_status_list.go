@@ -43,6 +43,7 @@ func (h *StatusListHandler) ServeStatusList(ctx *azugo.Context) {
 		ctx.Error(pkerrors.HTTP("statusList", "invalid", "invalid country code"))
 		return
 	}
+
 	if !h.config.ValidateDoctype(doctype) {
 		ctx.Error(pkerrors.HTTP("statusList", "invalid", "invalid document type"))
 		return
@@ -54,6 +55,7 @@ func (h *StatusListHandler) ServeStatusList(ctx *azugo.Context) {
 	}
 
 	var contentType, fileName string
+
 	switch parseAcceptHeader(accept) {
 	case StatusListJWTContentType:
 		contentType = StatusListJWTContentType
@@ -75,6 +77,7 @@ func (h *StatusListHandler) ServeStatusList(ctx *azugo.Context) {
 		} else {
 			ctx.Error(pkerrors.InternalError{Err: err})
 		}
+
 		return
 	}
 
@@ -92,6 +95,7 @@ func parseAcceptHeader(accept string) string {
 		if idx := strings.Index(mt, ";"); idx != -1 {
 			mt = mt[:idx]
 		}
+
 		mt = strings.TrimSpace(mt)
 
 		switch mt {
@@ -103,5 +107,6 @@ func parseAcceptHeader(accept string) string {
 			return StatusListJWTContentType
 		}
 	}
+
 	return ""
 }

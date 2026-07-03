@@ -274,7 +274,6 @@ func TestGetIndex(t *testing.T) {
 	ta := newTestApp(t)
 	uri := createStoredStatusList(t, ta, "LV", "PID", "test-rand", 7)
 
-
 	tests := []struct {
 		name           string
 		path           string
