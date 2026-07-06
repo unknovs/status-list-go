@@ -322,9 +322,15 @@ HOST{/token_status_list/swagger}
 
 ## Features
 
-- Supports Attestation Status List (ASL) [draft-ietf-oauth-status-list-02](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-status-list-02)
-  * need to check diferences with draft v12
+- Supports Attestation Status List (ASL) [draft-ietf-oauth-status-list-12](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-status-list-12)
+  in both JWT (`statuslist+jwt`) and CWT (`application/statuslist+cwt`) formats.
+  * The CWT format is now IETF draft-ietf-oauth-status-list-12 conformant (see `changelog.md`).
+  * Both formats are continuously verified against the EU reference verifier library
+    [`github.com/gmb-eudi/go-statuslist`](https://github.com/gmb-eudi/go-statuslist)
+    in the test suite (`services.TestIssuedTokensVerifyWithGoStatuslist`), which fails the
+    build on any wire-format drift.
 - Supports Attestation Revocation List (ARL) [ ISO/IEC CD 18013-5 second edition ]
+  * The identifier-list mechanism is not yet aligned to draft-12 (pending the ARF VCR_11 Commission TS).
 
 ## How to contribute
 
