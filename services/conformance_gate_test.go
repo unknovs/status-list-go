@@ -96,9 +96,10 @@ func TestIssuedTokensVerifyWithGoStatuslist(t *testing.T) {
 					Format: statuslist.FormatAuto,
 				},
 				IssuerKeyResolver: resolve,
-				// FailClosed: an issued token that fails to verify must be a hard test
-				// failure (non-nil error), never a silently skipped StatusUnknown.
-				Policy: statuslist.Policy{FailClosed: true},
+				// Fail-closed (the zero value, go-statuslist >= this dependency bump):
+				// an issued token that fails to verify must be a hard test failure
+				// (non-nil error), never a silently skipped StatusUnknown.
+				Policy: statuslist.Policy{},
 			})
 			if err != nil {
 				t.Fatalf("%s: issued token failed go-statuslist verification: %v", format, err)
