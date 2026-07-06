@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+	statuslistspec "github.com/gmb-eudi/go-statuslist/spec"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/models"
@@ -47,19 +48,9 @@ const (
 	ErrSignCWTFormat             = "failed to sign CWT: %v"
 )
 
-// CWTClaims represents the CBOR Web Token claims for status list
-type CWTClaims struct {
-	Issuer     string                 `cbor:"1,keyasint,omitempty"` // iss
-	Subject    string                 `cbor:"2,keyasint,omitempty"` // sub
-	Audience   string                 `cbor:"3,keyasint,omitempty"` // aud
-	Expiration int64                  `cbor:"4,keyasint,omitempty"` // exp
-	NotBefore  int64                  `cbor:"5,keyasint,omitempty"` // nbf
-	IssuedAt   int64                  `cbor:"6,keyasint,omitempty"` // iat
-	CWTID      []byte                 `cbor:"7,keyasint,omitempty"` // cti
-	StatusList map[string]interface{} `cbor:"65534,keyasint"`       // status_list claim
-}
 type JWTClaims struct {
 	StatusList map[string]interface{} `json:"status_list"`
+	TTL        int64                  `json:"ttl"`
 	jwt.RegisteredClaims
 }
 
@@ -112,6 +103,9 @@ func (f *StatusListFormatter) GenerateJWT(tokenStatusList *models.IssuerStatusLi
 			"bits": 1,
 			"lst":  base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(tokenStatusList.StatusList.Compressed()),
 		},
+		// ttl: seconds a consumer may cache this token before re-fetching, matching
+		// GenerateCWT's ttl (65534) convention so JWT and CWT paths stay consistent.
+		TTL: 3600,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   listURL,
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -121,7 +115,7 @@ func (f *StatusListFormatter) GenerateJWT(tokenStatusList *models.IssuerStatusLi
 
 	// Create token with custom headers
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
-	token.Header["typ"] = "statuslist+jwt"
+	token.Header["typ"] = statuslistspec.MediaStatusListJWT
 	token.Header["x5c"] = []string{base64.StdEncoding.EncodeToString(cert.Raw)}
 
 	// Sign the token
@@ -164,14 +158,20 @@ func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusLi
 		return nil, fmt.Errorf("invalid expiry date: %w", err)
 	}
 
+	// draft-ietf-oauth-status-list-12 §5.2: status_list=65533 (CBOR map with a raw
+	// byte-string lst, NOT base64), ttl=65534. iss(1) stays as a bare claim key
+	// (not in scope of the spec package, since there is no spec.ClaimIss); sub(2)/
+	// exp(4)/iat(6) use the spec constants as a drift guard against the 2/4/6
+	// literals used elsewhere.
 	claims := map[interface{}]interface{}{
-		1: issuer,        // iss
-		2: listURL,       // sub
-		4: expiry.Unix(), // exp
-		6: now.Unix(),    // iat
-		65534: map[string]interface{}{
+		1:                       issuer,        // iss
+		statuslistspec.ClaimSub: listURL,       // 2  sub
+		statuslistspec.ClaimExp: expiry.Unix(), // 4  exp
+		statuslistspec.ClaimIat: now.Unix(),    // 6  iat
+		statuslistspec.ClaimTTL: int64(3600),   // 65534 ttl
+		statuslistspec.ClaimStatusList: map[string]interface{}{ // 65533 status_list
 			"bits": 1,
-			"lst":  base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(tokenStatusList.StatusList.Compressed()),
+			"lst":  tokenStatusList.StatusList.Compressed(), // raw []byte -> CBOR bstr
 		},
 	}
 
@@ -180,13 +180,13 @@ func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusLi
 		return nil, fmt.Errorf(ErrEncodeCWTFormat, err)
 	}
 
+	// draft-12: the token-type indicator is COSE protected-header typ (label 16,
+	// RFC 9596), not content type (label 3); x5chain (label 33) is protected.
 	headers := cose.Headers{
 		Protected: cose.ProtectedHeader{
-			cose.HeaderLabelAlgorithm:   cose.AlgorithmES256,
-			cose.HeaderLabelContentType: "application/statuslist+cwt",
-		},
-		Unprotected: cose.UnprotectedHeader{
-			33: []interface{}{cert.Raw},
+			cose.HeaderLabelAlgorithm: cose.AlgorithmES256,
+			statuslistspec.HeaderTyp:  statuslistspec.MediaStatusListCWT, // typ(16)
+			33:                        []interface{}{cert.Raw},           // x5chain
 		},
 	}
 
@@ -253,7 +253,9 @@ func (f *StatusListFormatter) GenerateIdentifierJWT(identifierList map[string]in
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
-	token.Header["typ"] = "statuslist+jwt"
+	// ARL reuses the statuslist+jwt typ pending its own media-type constants
+	// (D-2: ARL wire format out of scope for this phase; behavior unchanged).
+	token.Header["typ"] = statuslistspec.MediaStatusListJWT
 	token.Header["x5c"] = []string{base64.StdEncoding.EncodeToString(cert.Raw)}
 
 	tokenString, err := token.SignedString(privateKey)
@@ -314,8 +316,11 @@ func (f *StatusListFormatter) GenerateIdentifierCWT(identifierList map[string]in
 
 	headers := cose.Headers{
 		Protected: cose.ProtectedHeader{
-			cose.HeaderLabelAlgorithm:   cose.AlgorithmES256,
-			cose.HeaderLabelContentType: "application/statuslist+cwt",
+			cose.HeaderLabelAlgorithm: cose.AlgorithmES256,
+			// ARL reuses the statuslist+cwt content type pending its own media-type
+			// constants (D-2: ARL wire format out of scope for this phase; behavior
+			// unchanged).
+			cose.HeaderLabelContentType: statuslistspec.MediaStatusListCWT,
 		},
 		Unprotected: cose.UnprotectedHeader{
 			33: []interface{}{cert.Raw},
