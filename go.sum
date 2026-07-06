@@ -77,8 +77,8 @@ github.com/gabriel-vasile/mimetype v1.4.13 h1:46nXokslUBsAJE/wMsp5gtO500a4F3Nkz9
 github.com/gabriel-vasile/mimetype v1.4.13/go.mod h1:d+9Oxyo1wTzWdyVUPMmXFvp4F9tea18J8ufA774AB3s=
 github.com/gmb-eudi/go-eudi-crypto v0.0.1 h1:auIbcX9lRvtd16ELfLQmWEO7MY/3c4X7fPtHuEAUw8U=
 github.com/gmb-eudi/go-eudi-crypto v0.0.1/go.mod h1:7xUeNe7ZwNeRQpXC3WfK3Eq0FHn290N4GrbdNoikdl4=
-github.com/gmb-eudi/go-statuslist v0.0.2 h1:fwzC3kOPHhzKd8056YXaNNr0tHjdaAOHi9dL+VY2O1s=
-github.com/gmb-eudi/go-statuslist v0.0.2/go.mod h1:Ld0C9Uq228gVYN2HxiIPbOF22UzCvdDxs7LXUOjIZNI=
+github.com/gmb-eudi/go-statuslist v0.0.3 h1:JY7rbbb/wT/nLyC9TR2fcynb/lbvrSq0bsUTZ1maxX4=
+github.com/gmb-eudi/go-statuslist v0.0.3/go.mod h1:Ld0C9Uq228gVYN2HxiIPbOF22UzCvdDxs7LXUOjIZNI=
 github.com/gmb-lib/go-platform-kit v1.4.0 h1:jOdJOfIsDhfGjD/hvqMLxTne008TKOsdOjxa87Toh5Q=
 github.com/gmb-lib/go-platform-kit v1.4.0/go.mod h1:69MkL4QWIgJQFFf4dwqyruZ/sTLU1kTgoIEtLUd+Vcg=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
