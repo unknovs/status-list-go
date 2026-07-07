@@ -1,3 +1,19 @@
+/*
+Copyright (c) Gatis Beikerts
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package cleanup
 
 import (
@@ -6,6 +22,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/models"
@@ -21,7 +39,7 @@ func TestCleanupExpiredListsLocalStorage(t *testing.T) {
 	}
 
 	cfg := &config.Config{CleanupEnabled: true, CleanupHour: 0, CleanupMinute: 0}
-	service := NewService(cfg, stor)
+	service := NewService(cfg, stor, zap.NewNop())
 
 	expiredDate := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 	futureDate := time.Now().AddDate(0, 0, 3).Format("2006-01-02")
@@ -54,6 +72,37 @@ func TestCleanupExpiredListsLocalStorage(t *testing.T) {
 
 	if !exists(t, tempDir, "identifier_list/LV/pid/active") {
 		t.Fatalf("active identifier directory should remain")
+	}
+}
+
+func TestHasExpired(t *testing.T) {
+	// Expiry date is the last valid day (inclusive), so a list must survive all of its
+	// expiry day and only be considered expired once now is past the end of that day.
+	now := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
+
+	strPtr := func(s string) *string { return &s }
+
+	tests := []struct {
+		name    string
+		expires *string
+		want    bool
+	}{
+		{name: "nil expiry never expires", expires: nil, want: false},
+		{name: "expires today is still valid", expires: strPtr("2026-06-26"), want: false},
+		{name: "expired yesterday", expires: strPtr("2026-06-25"), want: true},
+		{name: "expires tomorrow", expires: strPtr("2026-06-27"), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := hasExpired(&models.StatusListData{Expires: tt.expires}, now)
+			if err != nil {
+				t.Fatalf("hasExpired returned error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("hasExpired = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

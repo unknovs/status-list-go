@@ -17,131 +17,167 @@ limitations under the License.
 package config
 
 import (
-	"log"
+	"fmt"
 	"os"
-	"strconv"
+	"path/filepath"
 	"strings"
+
+	"azugo.io/core/validation"
+	pkgconfig "github.com/gmb-lib/go-platform-kit/config"
+	"github.com/spf13/viper"
 )
 
-// Config holds the application configuration
-type Config struct {
-	APIKey              string
-	ServiceURL          string
-	SwaggerURLPrefix    string
-	BasePath            string // Base path for all routes (e.g., "/api")
-	ServiceMode         string // "public" or "internal" - controls which endpoints are registered
-	TokenStatusListSize int
-	StatusListDir       string
-	BackupDir           string
-	LogDir              string
-	CleanupEnabled      bool
-	CleanupHour         int
-	CleanupMinute       int
-	RenewalEnabled      bool
-	RenewalHour         int
-	RenewalMinute       int
+// Configuration holds the application configuration.
+type Configuration struct {
+	*pkgconfig.BaseConfiguration `mapstructure:",squash"`
 
-	// Simple certificate configuration
-	PrivKeyPath string
-	CertPath    string
-	CountryCode string
+	APIKey           string `mapstructure:"api_key"`
+	ServiceURL       string `mapstructure:"service_url"`
+	SwaggerURLPrefix string `mapstructure:"swagger_url_prefix"`
+	BasePath         string `mapstructure:"base_path"`
+	ServiceMode      string `mapstructure:"service_mode"`
 
-	// Storage configuration
-	BackendType       string // "local" or "s3"
-	S3Bucket          string
-	S3Region          string
-	S3AccessKeyID     string
-	S3SecretAccessKey string
-	S3Endpoint        string // Custom S3 endpoint for compatible services (optional)
+	TokenStatusListSize int `mapstructure:"token_status_list_size"`
 
-	AllowedDoctypes map[string]bool
+	StatusListDir string `mapstructure:"status_list_dir"`
+	BackupDir     string `mapstructure:"backup_dir"`
+	LogDir        string `mapstructure:"log_dir"`
+
+	CleanupEnabled bool `mapstructure:"status_list_cleanup_enabled"`
+	CleanupHour    int  `mapstructure:"status_list_cleanup_hour"`
+	CleanupMinute  int  `mapstructure:"status_list_cleanup_minute"`
+
+	RenewalEnabled bool `mapstructure:"status_list_renewal_enabled"`
+	RenewalHour    int  `mapstructure:"status_list_renewal_hour"`
+	RenewalMinute  int  `mapstructure:"status_list_renewal_minute"`
+
+	PrivKeyPath string `mapstructure:"private_key_path"`
+	CertPath    string `mapstructure:"certificate_path"`
+	CountryCode string `mapstructure:"country_code"`
+
+	BackendType       string `mapstructure:"status_list_storage"`
+	S3Bucket          string `mapstructure:"s3_bucket"`
+	S3Region          string `mapstructure:"s3_region"`
+	S3AccessKeyID     string `mapstructure:"s3_access_key_id"`
+	S3SecretAccessKey string `mapstructure:"s3_secret_access_key"`
+	S3Endpoint        string `mapstructure:"s3_endpoint"`
+
+	AllowedDoctypesRaw string          `mapstructure:"allowed_doctypes"`
+	AllowedDoctypes    map[string]bool `mapstructure:"-"`
 }
 
-// Load loads configuration from environment variables
-func Load() (*Config, error) {
-	log.Println("Loading configuration from environment variables")
+// Config is an alias for Configuration for backward compatibility.
+type Config = Configuration
 
-	config := &Config{
-		APIKey:           getEnv("API_KEY", "test"),
-		ServiceURL:       getEnv("SERVICE_URL", "http://localhost:8080/"), // from this value, Status List URL is derived
-		SwaggerURLPrefix: getEnv("SWAGGER_URL_PREFIX", ""),                // Empty means use ServiceURL as base, e.g., "/api"
-		BasePath:         NormalizeBasePath(getEnv("BASE_PATH", "")),      // Base path for all routes (e.g., "/api")
-		ServiceMode:      getEnv("SERVICE_MODE", "internal"),              // "public" (read-only (GET methods), no Swagger) or "internal" (full API + Swagger)
-
-		// Maximum number of entries (tokens) that a single status list can hold before a new list needs to be created.
-		TokenStatusListSize: 10000,
-
-		// STATUS_LIST_STORAGE=local configuration, local filesystem storage.
-		// Backups are not implemented, shall be done externally, on infrastructure level if needed.
-		StatusListDir: getEnv("STATUS_LIST_DIR", "/var/opt/status_lists"),
-		BackupDir:     getEnv("BACKUP_DIR", "/var/opt/status_list_backup"),
-		LogDir:        getEnv("LOG_DIR", "/tmp/status_lists"),
-
-		// Expired status list cleanup service configuration
-		CleanupEnabled: getEnvBool("STATUS_LIST_CLEANUP_ENABLED", true),
-		CleanupHour:    normalizeHour(getEnvInt("STATUS_LIST_CLEANUP_HOUR", 4)),     // Default to 4 AM. Normalize to valid hour (value between 0-23)
-		CleanupMinute:  normalizeMinute(getEnvInt("STATUS_LIST_CLEANUP_MINUTE", 0)), // Default to 0 minutes. Normalize to valid minute (value between 0-59)
-
-		// Status list renewal service configuration
-		RenewalEnabled: getEnvBool("STATUS_LIST_RENEWAL_ENABLED", true),
-		RenewalHour:    normalizeHour(getEnvInt("STATUS_LIST_RENEWAL_HOUR", 12)),    // Default to 12 PM (noon). Normalize to valid hour (value between 0-23)
-		RenewalMinute:  normalizeMinute(getEnvInt("STATUS_LIST_RENEWAL_MINUTE", 0)), // Default to 0 minutes. Normalize to valid minute (value between 0-59)
-
-		// Certificate configuration from environment or Docker secrets
-		// PrivKeyPath: getEnv("PRIVATE_KEY_PATH", "/run/secrets/private_key"),
-		// CertPath:    getEnv("CERTIFICATE_PATH", "/run/secrets/certificate"),
-		PrivKeyPath: getEnvPath("PRIVATE_KEY_PATH", "temp/private_key/decrypted_key.pem"),
-		CertPath:    getEnvPath("CERTIFICATE_PATH", "temp/certificate/PID-DS-0002.cert.der"),
-
-		// Storage configuration
-		BackendType:       getEnv("STATUS_LIST_STORAGE", "local"), // "local" or "s3", default to "local" for local filesystem storage
-		S3Bucket:          getEnv("S3_BUCKET", ""),
-		S3Region:          getEnv("S3_REGION", "us-east-1"),
-		S3AccessKeyID:     getEnv("S3_ACCESS_KEY_ID", ""),
-		S3SecretAccessKey: getEnv("S3_SECRET_ACCESS_KEY", ""),
-		S3Endpoint:        getEnv("S3_ENDPOINT", ""),
-
-		// Allowed document types (reads `,` separated values)
-		// and country code (supports one country code, if needed can be extended to multiple using `getEnvArray`)
-		AllowedDoctypes: getAllowedDoctypes(),
-		CountryCode:     getEnv("COUNTRY_CODE", "LV"), // Default to Latvia (LV)
+// New returns a new Configuration with the embedded base initialized.
+func New() *Configuration {
+	return &Configuration{
+		BaseConfiguration: pkgconfig.New(),
 	}
-
-	// Validate and normalize service mode
-	config.ServiceMode = strings.ToLower(strings.TrimSpace(config.ServiceMode))
-	if config.ServiceMode != "public" && config.ServiceMode != "internal" {
-		log.Printf("Invalid SERVICE_MODE '%s', defaulting to 'internal'", config.ServiceMode)
-		config.ServiceMode = "internal"
-	}
-	log.Printf("Service mode: %s", config.ServiceMode)
-
-	// Ensure directories exist
-	if err := ensureDir(config.StatusListDir); err != nil {
-		return nil, err
-	}
-	if err := ensureDir(config.BackupDir); err != nil {
-		return nil, err
-	}
-	if err := ensureDir(config.LogDir); err != nil {
-		return nil, err
-	}
-
-	return config, nil
 }
 
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		// Check if it's a file path (Docker secrets, Kubernetes secrets, etc.)
-		if strings.HasPrefix(value, "/") {
-			if data, err := os.ReadFile(value); err == nil {
-				return strings.TrimSpace(string(data))
-			}
-			// If file doesn't exist or can't be read, treat as regular value
+// Bind registers environment-variable bindings and defaults with viper.
+func (c *Configuration) Bind(_ string, v *viper.Viper) {
+	c.BaseConfiguration.Bind("", v)
+
+	v.SetDefault("service_name", "status-list")
+	v.SetDefault("api_key", "test")
+	v.SetDefault("service_url", "http://localhost:8080/")
+	v.SetDefault("service_mode", "internal")
+	v.SetDefault("token_status_list_size", 10000)
+	v.SetDefault("status_list_dir", "/var/opt/status_lists")
+	v.SetDefault("backup_dir", "/var/opt/status_list_backup")
+	v.SetDefault("log_dir", "/tmp/status_lists")
+	v.SetDefault("status_list_cleanup_enabled", true)
+	v.SetDefault("status_list_cleanup_hour", 4)
+	v.SetDefault("status_list_cleanup_minute", 0)
+	v.SetDefault("status_list_renewal_enabled", true)
+	v.SetDefault("status_list_renewal_hour", 12)
+	v.SetDefault("status_list_renewal_minute", 0)
+	v.SetDefault("private_key_path", "temp/private_key/decrypted_key.pem")
+	v.SetDefault("certificate_path", "temp/certificate/PID-DS-0002.cert.der")
+	v.SetDefault("country_code", "LV")
+	v.SetDefault("status_list_storage", "local")
+	v.SetDefault("s3_region", "us-east-1")
+
+	_ = v.BindEnv("api_key", "API_KEY")
+	_ = v.BindEnv("service_url", "SERVICE_URL")
+	_ = v.BindEnv("swagger_url_prefix", "SWAGGER_URL_PREFIX")
+	_ = v.BindEnv("base_path", "BASE_PATH")
+	_ = v.BindEnv("service_mode", "SERVICE_MODE")
+	_ = v.BindEnv("token_status_list_size", "TOKEN_STATUS_LIST_SIZE")
+	_ = v.BindEnv("status_list_dir", "STATUS_LIST_DIR")
+	_ = v.BindEnv("backup_dir", "BACKUP_DIR")
+	_ = v.BindEnv("log_dir", "LOG_DIR")
+	_ = v.BindEnv("status_list_cleanup_enabled", "STATUS_LIST_CLEANUP_ENABLED")
+	_ = v.BindEnv("status_list_cleanup_hour", "STATUS_LIST_CLEANUP_HOUR")
+	_ = v.BindEnv("status_list_cleanup_minute", "STATUS_LIST_CLEANUP_MINUTE")
+	_ = v.BindEnv("status_list_renewal_enabled", "STATUS_LIST_RENEWAL_ENABLED")
+	_ = v.BindEnv("status_list_renewal_hour", "STATUS_LIST_RENEWAL_HOUR")
+	_ = v.BindEnv("status_list_renewal_minute", "STATUS_LIST_RENEWAL_MINUTE")
+	_ = v.BindEnv("private_key_path", "PRIVATE_KEY_PATH")
+	_ = v.BindEnv("certificate_path", "CERTIFICATE_PATH")
+	_ = v.BindEnv("country_code", "COUNTRY_CODE")
+	_ = v.BindEnv("status_list_storage", "STATUS_LIST_STORAGE")
+	_ = v.BindEnv("s3_bucket", "S3_BUCKET")
+	_ = v.BindEnv("s3_region", "S3_REGION")
+	_ = v.BindEnv("s3_access_key_id", "S3_ACCESS_KEY_ID")
+	_ = v.BindEnv("s3_secret_access_key", "S3_SECRET_ACCESS_KEY")
+	_ = v.BindEnv("s3_endpoint", "S3_ENDPOINT")
+	_ = v.BindEnv("allowed_doctypes", "ALLOWED_DOCTYPES")
+}
+
+// Validate normalizes fields and ensures all required directories exist.
+func (c *Configuration) Validate(valid *validation.Validate) error {
+	// Restore the v1.0.5 secret resolution that the viper migration dropped: when a
+	// credential env var holds a path to a mounted secret file (Docker/Kubernetes
+	// secrets), read and trim the file contents instead of using the literal path.
+	// Without this the path string itself is used as the credential, which surfaces
+	// as S3 SignatureDoesNotMatch. Runs before the API key check below so a
+	// file-provided API key is validated on its real value.
+	c.APIKey = resolveSecret(c.APIKey)
+	c.S3AccessKeyID = resolveSecret(c.S3AccessKeyID)
+	c.S3SecretAccessKey = resolveSecret(c.S3SecretAccessKey)
+
+	c.BasePath = NormalizeBasePath(c.BasePath)
+
+	c.ServiceMode = strings.ToLower(strings.TrimSpace(c.ServiceMode))
+	if c.ServiceMode != "public" && c.ServiceMode != "internal" {
+		c.ServiceMode = "internal"
+	}
+
+	// In internal mode the write endpoints (/take, /set) are exposed and protected
+	// only by the API key. Refuse to start with a missing or well-known default key
+	// so the service never ships writable by anyone who knows the default.
+	if c.ServiceMode == "internal" {
+		if strings.TrimSpace(c.APIKey) == "" || c.APIKey == "test" {
+			return fmt.Errorf("api_key must be set to a non-default value in internal mode (set the API_KEY environment variable)")
 		}
-		return value
 	}
-	// Fall back to default value if environment variable is not set or empty
-	return defaultValue
+
+	c.CleanupHour = normalizeHour(c.CleanupHour)
+	c.CleanupMinute = normalizeMinute(c.CleanupMinute)
+	c.RenewalHour = normalizeHour(c.RenewalHour)
+	c.RenewalMinute = normalizeMinute(c.RenewalMinute)
+
+	c.AllowedDoctypes = parseAllowedDoctypes(c.AllowedDoctypesRaw)
+
+	return valid.Struct(c)
+}
+
+// resolveSecret returns the trimmed contents of the file at value when value is an
+// absolute path to a readable file (the Docker/Kubernetes secret-mount convention),
+// otherwise it returns value unchanged. This mirrors the v1.0.5 getEnv behaviour that
+// the viper-based configuration dropped. Directory paths and non-existent files fall
+// through to the literal value, so ordinary string credentials are unaffected.
+func resolveSecret(value string) string {
+	if filepath.IsAbs(value) {
+		if data, err := os.ReadFile(value); err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+
+	return value
 }
 
 // NormalizeBasePath ensures configured base paths are canonicalized to a leading slash and no trailing slash.
@@ -163,81 +199,19 @@ func NormalizeBasePath(path string) string {
 	return trimmed
 }
 
-func getEnvPath(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
+// ValidateDoctype validates if the doctype is allowed.
+func (c *Config) ValidateDoctype(doctype string) bool {
+	return c.AllowedDoctypes[doctype]
 }
 
-// getEnvArray parses a comma-separated environment variable into a map with true values
-// If the environment variable is not set or empty, returns an empty map
-func getEnvArray(key string) map[string]bool {
-	result := make(map[string]bool)
-
-	value := os.Getenv(key)
-	if value == "" {
-		return result
-	}
-
-	// Split by comma and trim whitespace
-	items := strings.Split(value, ",")
-	for _, item := range items {
-		trimmed := strings.TrimSpace(item)
-		if trimmed != "" {
-			result[trimmed] = true
-		}
-	}
-
-	return result
+// ValidateCountry validates if the country matches the configured country.
+func (c *Config) ValidateCountry(country string) bool {
+	return country == c.CountryCode
 }
 
-func getEnvBool(key string, defaultValue bool) bool {
-	value := strings.TrimSpace(os.Getenv(key))
-	if value == "" {
-		return defaultValue
-	}
-
-	switch strings.ToLower(value) {
-	case "true", "1", "yes", "y", "on":
-		return true
-	case "false", "0", "no", "n", "off":
-		return false
-	default:
-		return defaultValue
-	}
-}
-
-func getEnvInt(key string, defaultValue int) int {
-	value := strings.TrimSpace(os.Getenv(key))
-	if value == "" {
-		return defaultValue
-	}
-
-	parsed, err := strconv.Atoi(value)
-	if err != nil {
-		return defaultValue
-	}
-
-	return parsed
-}
-
-func getAllowedDoctypes() map[string]bool {
-	// Check if doctypes are specified via environment variable
-	envDoctypes := getEnvArray("ALLOWED_DOCTYPES")
-	if len(envDoctypes) > 0 {
-		return envDoctypes
-	}
-
-	// Default hardcoded doctypes if environment variable is not set
-	return map[string]bool{
-		"eu.europa.ec.eudi.ehic.1":    true,
-		"eu.europa.ec.eudi.hiid.1":    true,
-		"eu.europa.ec.eudi.pid.1":     true,
-		"org.iso.18013.5.1.mDL":       true,
-		"urn:eudi:pid:1":              true,
-		"urn:eu.europa.ec.eudi:pid:1": true,
-	}
+// GetCertificatePaths returns the certificate paths for this instance.
+func (c *Config) GetCertificatePaths() (privKeyPath string, certPath string) {
+	return c.PrivKeyPath, c.CertPath
 }
 
 func ensureDir(path string) error {
@@ -248,6 +222,7 @@ func normalizeHour(value int) int {
 	if value < 0 || value > 23 {
 		return 2
 	}
+
 	return value
 }
 
@@ -255,20 +230,29 @@ func normalizeMinute(value int) int {
 	if value < 0 || value > 59 {
 		return 0
 	}
+
 	return value
 }
 
-// ValidateDoctype validates if the doctype is allowed
-func (c *Config) ValidateDoctype(doctype string) bool {
-	return c.AllowedDoctypes[doctype]
-}
+func parseAllowedDoctypes(raw string) map[string]bool {
+	result := make(map[string]bool)
 
-// ValidateCountry validates if the country matches the configured country
-func (c *Config) ValidateCountry(country string) bool {
-	return country == c.CountryCode
-}
+	if raw != "" {
+		for _, item := range strings.Split(raw, ",") {
+			if t := strings.TrimSpace(item); t != "" {
+				result[t] = true
+			}
+		}
 
-// GetCertificatePaths returns the certificate paths for this instance
-func (c *Config) GetCertificatePaths() (privKeyPath string, certPath string) {
-	return c.PrivKeyPath, c.CertPath
+		return result
+	}
+
+	return map[string]bool{
+		"eu.europa.ec.eudi.ehic.1":    true,
+		"eu.europa.ec.eudi.hiid.1":    true,
+		"eu.europa.ec.eudi.pid.1":     true,
+		"org.iso.18013.5.1.mDL":       true,
+		"urn:eudi:pid:1":              true,
+		"urn:eu.europa.ec.eudi:pid:1": true,
+	}
 }

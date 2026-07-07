@@ -1,3 +1,19 @@
+/*
+Copyright (c) Gatis Beikerts
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package storage
 
 import (
@@ -70,6 +86,7 @@ func (ls *LocalStorage) Read(path string) ([]byte, error) {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: %s", errors.ErrNotFound, path)
 		}
+
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
@@ -90,6 +107,7 @@ func (ls *LocalStorage) Write(path string, content []byte, version int) error {
 		if !os.IsNotExist(err) {
 			return fmt.Errorf("failed to read version: %w", err)
 		}
+
 		currentVersion = 0
 	}
 
@@ -124,9 +142,11 @@ func (ls *LocalStorage) Exists(path string) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
+
 	if os.IsNotExist(err) {
 		return false, nil
 	}
+
 	return false, fmt.Errorf("failed to check file existence: %w", err)
 }
 
@@ -162,7 +182,6 @@ func (ls *LocalStorage) List(prefix string) ([]string, error) {
 
 		return nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to list files: %w", err)
 	}
@@ -201,6 +220,7 @@ func (ls *LocalStorage) DeleteTree(prefix string) error {
 		if os.IsNotExist(err) {
 			return nil
 		}
+
 		return fmt.Errorf("failed to inspect path: %w", err)
 	}
 
@@ -216,17 +236,19 @@ func (ls *LocalStorage) DeleteTree(prefix string) error {
 func atomicWrite(path string, data []byte) error {
 	// Create temp file in the same directory as the target file
 	dir := filepath.Dir(path)
+
 	tmpFile, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
+
 	tmpPath := tmpFile.Name()
 
 	// Ensure temp file is removed on error
 	defer func() {
 		if tmpFile != nil {
-			tmpFile.Close()
-			os.Remove(tmpPath)
+			_ = tmpFile.Close()
+			_ = os.Remove(tmpPath)
 		}
 	}()
 
@@ -244,12 +266,13 @@ func atomicWrite(path string, data []byte) error {
 	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("failed to close temp file: %w", err)
 	}
+
 	tmpFile = nil // Prevent cleanup in defer
 
 	// Rename temp file to final location (atomic on POSIX systems)
 	if err := os.Rename(tmpPath, path); err != nil {
 		// Cleanup on Windows if rename fails
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 

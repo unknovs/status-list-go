@@ -1,3 +1,19 @@
+/*
+Copyright (c) Gatis Beikerts
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package app
 
 import (
@@ -8,54 +24,36 @@ import (
 
 	"github.com/valyala/fasthttp"
 
-	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/services/storage"
 )
 
-func newTestConfig(t *testing.T) *config.Config {
+func newTestApp(t *testing.T) *App {
 	t.Helper()
+
+	tempDir := t.TempDir()
+
 	t.Setenv("METRICS_ENABLED", "false")
+	t.Setenv("SERVICE_NAME", "test")
+	t.Setenv("API_KEY", "test-api-key")
+	t.Setenv("SERVICE_URL", "http://localhost:8080/")
+	t.Setenv("STATUS_LIST_DIR", filepath.Join(tempDir, "status"))
+	t.Setenv("BACKUP_DIR", filepath.Join(tempDir, "backup"))
+	t.Setenv("LOG_DIR", filepath.Join(tempDir, "logs"))
+	t.Setenv("PRIVATE_KEY_PATH", filepath.Join(tempDir, "key.pem"))
+	t.Setenv("CERTIFICATE_PATH", filepath.Join(tempDir, "cert.pem"))
+	t.Setenv("COUNTRY_CODE", "LV")
+	t.Setenv("STATUS_LIST_STORAGE", "local")
+	t.Setenv("ALLOWED_DOCTYPES", "PID")
 
-	tempDir, err := os.MkdirTemp("", "status-list-app-test")
+	application, err := NewApp(nil, "")
 	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
+		t.Fatalf("NewApp failed: %v", err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(tempDir) })
-
-	statusDir := filepath.Join(tempDir, "status")
-	if err := os.MkdirAll(statusDir, 0o755); err != nil {
-		t.Fatalf("failed to create status dir: %v", err)
-	}
-
-	backupDir := filepath.Join(tempDir, "backup")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("failed to create backup dir: %v", err)
-	}
-
-	logDir := filepath.Join(tempDir, "logs")
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		t.Fatalf("failed to create log dir: %v", err)
-	}
-
-	return &config.Config{
-		APIKey:              "test-api-key",
-		ServiceURL:          "http://localhost:8080/",
-		SwaggerURLPrefix:    "",
-		TokenStatusListSize: 10,
-		StatusListDir:       statusDir,
-		BackupDir:           backupDir,
-		LogDir:              logDir,
-		PrivKeyPath:         filepath.Join(tempDir, "key.pem"),
-		CertPath:            filepath.Join(tempDir, "cert.pem"),
-		CountryCode:         "LV",
-		BackendType:         "local",
-		AllowedDoctypes:     map[string]bool{"PID": true},
-	}
+	return application
 }
 
 func TestNewAppInitializesAzugo(t *testing.T) {
-	cfg := newTestConfig(t)
-	application := NewApp(cfg)
+	application := newTestApp(t)
 
 	if application == nil {
 		t.Fatal("expected NewApp to return a non-nil instance")
@@ -72,7 +70,7 @@ func TestNewAppInitializesAzugo(t *testing.T) {
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	application := NewApp(newTestConfig(t))
+	application := newTestApp(t)
 
 	resp := executeRequest(t, application, fasthttp.MethodGet, "/health", nil)
 
@@ -94,37 +92,33 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestCORSMiddlewareAddsHeaders(t *testing.T) {
-	application := NewApp(newTestConfig(t))
+	application := newTestApp(t)
 
-	resp := executeRequest(t, application, fasthttp.MethodGet, "/health", nil)
+	// Azugo's built-in CORS only sets response headers when an Origin is present.
+	resp := executeRequest(t, application, fasthttp.MethodGet, "/health", map[string]string{
+		"Origin": "http://example.com",
+	})
 
-	if origin := string(resp.Header.Peek("Access-Control-Allow-Origin")); origin != "*" {
-		t.Fatalf("unexpected CORS origin: %q", origin)
-	}
-	if methods := string(resp.Header.Peek("Access-Control-Allow-Methods")); methods == "" {
-		t.Fatal("expected CORS methods header to be set")
-	}
-	if headers := string(resp.Header.Peek("Access-Control-Allow-Headers")); headers == "" {
-		t.Fatal("expected CORS headers header to be set")
+	if origin := string(resp.Header.Peek("Access-Control-Allow-Origin")); origin == "" {
+		t.Fatal("expected Access-Control-Allow-Origin to be set")
 	}
 }
 
 func TestOptionsPreflightShortCircuits(t *testing.T) {
-	application := NewApp(newTestConfig(t))
+	application := newTestApp(t)
 
-	resp := executeRequest(t, application, fasthttp.MethodOptions, "/token_status_list/take", nil)
+	// Azugo's built-in CORS preflight returns 204 No Content (not 200).
+	resp := executeRequest(t, application, fasthttp.MethodOptions, "/token_status_list/take", map[string]string{
+		"Origin": "http://example.com",
+	})
 
-	if got, want := resp.StatusCode(), fasthttp.StatusOK; got != want {
+	if got, want := resp.StatusCode(), fasthttp.StatusNoContent; got != want {
 		t.Fatalf("preflight status mismatch: got %d want %d", got, want)
-	}
-	if len(resp.Body()) != 0 {
-		t.Fatalf("expected preflight body to be empty, got %q", string(resp.Body()))
 	}
 }
 
 func TestSwaggerIndexServed(t *testing.T) {
-	cfg := newTestConfig(t)
-	application := NewApp(cfg)
+	application := newTestApp(t)
 
 	resp := executeRequest(t, application, fasthttp.MethodGet, "/token_status_list/swagger", nil)
 
@@ -158,3 +152,6 @@ func executeRequest(t *testing.T, application *App, method, path string, headers
 
 	return &resp
 }
+
+// TestMain_unused is here to ensure the os import is used in test setup.
+var _ = os.Getenv

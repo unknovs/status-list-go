@@ -19,11 +19,13 @@ package handlers
 import (
 	stdErrors "errors"
 	"fmt"
-	"net/http"
 	"path/filepath"
 	"strings"
 
-	"github.com/unknovs/status-list-go/errors"
+	"azugo.io/azugo"
+	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
+
+	localerrors "github.com/unknovs/status-list-go/errors"
 )
 
 const (
@@ -31,49 +33,30 @@ const (
 	StatusListCWTContentType = "application/statuslist+cwt"
 )
 
-// ServeStatusList serves the status list JWT file for a given country, doctype, and id (rand)
-func (h *StatusListHandler) ServeStatusList(w http.ResponseWriter, r *http.Request) {
-	// Only allow GET method
-	if r.Method != http.MethodGet {
-		errors.WriteError(w, http.StatusMethodNotAllowed, errors.ErrBadRequest)
-		return
-	}
+// ServeStatusList serves the status list JWT/CWT file for the given country, doctype, and id.
+func (h *StatusListHandler) ServeStatusList(ctx *azugo.Context) {
+	country := ctx.Params.String("country")
+	doctype := ctx.Params.String("doctype")
+	rand := ctx.Params.String("id")
 
-	// Normalize path by stripping configured base path when present.
-	path, ok := normalizeStatusListPath(r.URL.Path, h.config.BasePath)
-	if !ok {
-		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidPath)
-		return
-	}
-
-	parts := strings.Split(path, "/")
-	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
-		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidPath)
-		return
-	}
-	country, doctype, rand := parts[0], parts[1], parts[2]
-
-	// Validate country and doctype using existing validation
 	if !h.config.ValidateCountry(country) {
-		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidCountry)
-		return
-	}
-	if !h.config.ValidateDoctype(doctype) {
-		errors.WriteError(w, http.StatusBadRequest, errors.ErrInvalidDoctype)
+		ctx.Error(pkerrors.HTTP("statusList", "invalid", "invalid country code"))
 		return
 	}
 
-	// Content negotiation - support both JWT and CWT
-	// Parse Accept header to handle multiple media types (e.g., "application/statuslist+jwt,application/json")
-	accept := r.Header.Get("Accept")
+	if !h.config.ValidateDoctype(doctype) {
+		ctx.Error(pkerrors.HTTP("statusList", "invalid", "invalid document type"))
+		return
+	}
+
+	accept := ctx.Header.Get("Accept")
 	if accept == "" || accept == "*/*" {
-		accept = StatusListJWTContentType // Default to JWT
+		accept = StatusListJWTContentType
 	}
 
 	var contentType, fileName string
-	acceptedType := parseAcceptHeader(accept)
 
-	switch acceptedType {
+	switch parseAcceptHeader(accept) {
 	case StatusListJWTContentType:
 		contentType = StatusListJWTContentType
 		fileName = "token_status_list.jwt"
@@ -81,84 +64,49 @@ func (h *StatusListHandler) ServeStatusList(w http.ResponseWriter, r *http.Reque
 		contentType = StatusListCWTContentType
 		fileName = "token_status_list.cwt"
 	default:
-		errors.WriteError(w, http.StatusNotAcceptable, errors.ErrInvalidAccept)
+		ctx.Error(pkerrors.HTTP("statusList", "notAcceptable"))
 		return
 	}
 
-	// Build storage path (platform-independent)
-	statusListPath := filepath.Join("token_status_list", country, doctype, rand, fileName)
-	// Convert to forward slashes for storage consistency (S3 uses forward slashes)
-	statusListPath = filepath.ToSlash(statusListPath)
+	statusListPath := filepath.ToSlash(filepath.Join("token_status_list", country, doctype, rand, fileName))
 
-	// Read file from storage backend
 	data, err := h.listManager.GetStorage().Read(statusListPath)
 	if err != nil {
-		// Check if it's a not found error
-		if stdErrors.Is(err, errors.ErrNotFound) {
-			errors.WriteError(w, http.StatusNotFound, errors.ErrListNotFound)
+		if stdErrors.Is(err, localerrors.ErrNotFound) {
+			ctx.Error(pkerrors.HTTP("statusList", "notFound"))
 		} else {
-			errors.WriteError(w, http.StatusInternalServerError, errors.ErrInternalServer)
+			ctx.Error(pkerrors.InternalError{Err: err})
 		}
+
 		return
 	}
 
-	// Set response headers
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "public, max-age=3600") // Add security headers for RFC compliance
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
-
-	// Write file content
-	if _, err := w.Write(data); err != nil {
-		// Log error but don't send response as headers are already written
-		return
-	}
+	ctx.Header.Set("Content-Type", contentType)
+	ctx.Header.Set("Cache-Control", "no-store")
+	ctx.Header.Set("X-Content-Type-Options", "nosniff")
+	ctx.Header.Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	ctx.Raw(data)
 }
 
-// parseAcceptHeader extracts the first supported media type from Accept header
-// Handles comma-separated values like "application/statuslist+jwt,application/json,text/html"
+// parseAcceptHeader extracts the first supported media type from the Accept header.
 func parseAcceptHeader(accept string) string {
-	// Split by comma to handle multiple media types
-	mediaTypes := strings.Split(accept, ",")
-
-	for _, mediaType := range mediaTypes {
-		// Trim whitespace and remove quality values (e.g., ";q=0.9")
+	for _, mediaType := range strings.Split(accept, ",") {
 		mt := strings.TrimSpace(mediaType)
 		if idx := strings.Index(mt, ";"); idx != -1 {
 			mt = mt[:idx]
 		}
+
 		mt = strings.TrimSpace(mt)
 
-		// Check if this is a supported media type (prefer JWT over CWT)
-		if mt == StatusListJWTContentType {
+		switch mt {
+		case StatusListJWTContentType:
+			return StatusListJWTContentType
+		case StatusListCWTContentType:
+			return StatusListCWTContentType
+		case "*/*", "application/*":
 			return StatusListJWTContentType
 		}
-		if mt == StatusListCWTContentType {
-			return StatusListCWTContentType
-		}
-		// Wildcards
-		if mt == "*/*" || mt == "application/*" {
-			return StatusListJWTContentType // Default to JWT
-		}
 	}
 
-	// No supported media type found
 	return ""
-}
-
-func normalizeStatusListPath(rawPath, basePath string) (string, bool) {
-	path := rawPath
-	if basePath != "" && strings.HasPrefix(path, basePath) {
-		path = strings.TrimPrefix(path, basePath)
-		if !strings.HasPrefix(path, "/") {
-			path = "/" + path
-		}
-	}
-
-	if !strings.HasPrefix(path, "/token_status_list/") {
-		return "", false
-	}
-
-	trimmed := strings.TrimPrefix(path, "/token_status_list/")
-	return trimmed, true
 }

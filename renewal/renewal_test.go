@@ -17,15 +17,17 @@ limitations under the License.
 package renewal
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/errors"
@@ -99,7 +101,7 @@ func TestRenewTokenStatusList(t *testing.T) {
 	tempDir, statusListDir, cfg, stor := setupTestEnvironment(t)
 	defer os.RemoveAll(tempDir)
 
-	rs := NewRenewalService(cfg, stor)
+	rs := NewRenewalService(cfg, stor, zap.NewNop())
 	statusListData := createTestStatusListData(false)
 	formatter := services.NewStatusListFormatter(cfg)
 
@@ -138,7 +140,7 @@ func TestRenewIdentifierList(t *testing.T) {
 	tempDir, statusListDir, cfg, stor := setupTestEnvironment(t)
 	defer os.RemoveAll(tempDir)
 
-	rs := NewRenewalService(cfg, stor)
+	rs := NewRenewalService(cfg, stor, zap.NewNop())
 	statusListData := createTestStatusListData(false)
 	formatter := services.NewStatusListFormatter(cfg)
 
@@ -181,7 +183,7 @@ func TestProcessListFile(t *testing.T) {
 	tempDir, statusListDir, cfg, stor := setupTestEnvironment(t)
 	defer os.RemoveAll(tempDir)
 
-	rs := NewRenewalService(cfg, stor)
+	rs := NewRenewalService(cfg, stor, zap.NewNop())
 	formatter := services.NewStatusListFormatter(cfg)
 
 	t.Run("process file with invalid expiry date format", func(t *testing.T) {
@@ -229,7 +231,7 @@ func TestRenewListsEmptyDirectory(t *testing.T) {
 	tempDir, _, cfg, stor := setupTestEnvironment(t)
 	defer os.RemoveAll(tempDir)
 
-	rs := NewRenewalService(cfg, stor)
+	rs := NewRenewalService(cfg, stor, zap.NewNop())
 	err := rs.RenewLists()
 
 	// Should not error on empty directory
@@ -256,10 +258,11 @@ func TestRenewListsNonExistentDirectory(t *testing.T) {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
 
-	// Test that RenewLists returns an error for non-existent directory
-	err = NewRenewalService(cfg, stor).RenewLists()
-	if err == nil {
-		t.Errorf("RenewLists() should return an error for non-existent directory")
+	// RenewLists no longer errors on non-existent directories — it logs and returns nil.
+	// The storage.List() call handles backend availability gracefully.
+	err = NewRenewalService(cfg, stor, zap.NewNop()).RenewLists()
+	if err != nil {
+		t.Errorf("RenewLists() returned unexpected error: %v", err)
 	}
 
 	tests := []struct {
@@ -401,7 +404,7 @@ func TestRenewListsWalkErrors(t *testing.T) {
 				t.Fatalf("Failed to create storage: %v", err)
 			}
 
-			rs := NewRenewalService(cfg, stor)
+			rs := NewRenewalService(cfg, stor, zap.NewNop())
 			err = rs.RenewLists()
 
 			if (err != nil) != tt.wantErr {
@@ -411,22 +414,21 @@ func TestRenewListsWalkErrors(t *testing.T) {
 	}
 }
 
-// captureLogOutput captures log output for testing
-func captureLogOutput(_ *testing.T, testFunc func()) string {
-	// Save the original log output
-	originalOutput := log.Writer()
+// logsContainMsg checks if any log entry contains the given substring.
+func logsContainMsg(logs []observer.LoggedEntry, substr string) bool {
+	for _, entry := range logs {
+		if strings.Contains(entry.Message, substr) {
+			return true
+		}
+	}
+	return false
+}
 
-	// Create a buffer to capture log output
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-
-	// Restore original output after test
-	defer log.SetOutput(originalOutput)
-
-	// Run the test function
-	testFunc()
-
-	return buf.String()
+// newRenewalServiceWithObserver creates a RenewalService with an observable logger.
+func newRenewalServiceWithObserver(cfg *config.Config, stor storage.Storage) (*RenewalService, *observer.ObservedLogs) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	logger := zap.New(core)
+	return NewRenewalService(cfg, stor, logger), logs
 }
 
 // TestErrorLogging tests that error conditions are properly logged
@@ -434,70 +436,58 @@ func TestErrorLogging(t *testing.T) {
 	tempDir, statusListDir, cfg, stor := setupTestEnvironment(t)
 	defer os.RemoveAll(tempDir)
 
-	rs := NewRenewalService(cfg, stor)
 	formatter := services.NewStatusListFormatter(cfg)
 
 	t.Run("test file read error logging", func(t *testing.T) {
-		// Create a file with no read permissions
+		rs, logs := newRenewalServiceWithObserver(cfg, stor)
 		listDir := filepath.Join(statusListDir, "test_issuer", "token_status_list")
 		os.MkdirAll(listDir, 0755)
 		fullListPath := filepath.Join(listDir, "full_list.json")
-		os.WriteFile(fullListPath, []byte("test"), 0000) // No permissions
+		os.WriteFile(fullListPath, []byte("test"), 0000)
 
-		logOutput := captureLogOutput(t, func() {
-			rs.processListFile(fullListPath, formatter)
-		})
+		rs.processListFile(fullListPath, formatter)
 
-		// On Windows, permission restrictions might not work as expected,
-		// but we should still get some error (either read error or unmarshal error)
-		if !strings.Contains(logOutput, "Error reading file") && !strings.Contains(logOutput, "Error unmarshaling file") {
-			t.Errorf("Expected either 'Error reading file' or 'Error unmarshaling file' log message, got: %s", logOutput)
+		entries := logs.All()
+		if !logsContainMsg(entries, "error reading file") && !logsContainMsg(entries, "error unmarshaling file") {
+			t.Errorf("Expected error log for unreadable file, got %d log entries", len(entries))
 		}
 
-		// Reset permissions for cleanup
 		os.Chmod(fullListPath, 0644)
 	})
 
 	t.Run("test JSON unmarshal error logging", func(t *testing.T) {
-		// Create a file with invalid JSON
+		rs, logs := newRenewalServiceWithObserver(cfg, stor)
 		listDir := filepath.Join(statusListDir, "test_issuer", "token_status_list")
 		os.MkdirAll(listDir, 0755)
 		fullListPath := filepath.Join(listDir, "full_list.json")
 		os.WriteFile(fullListPath, []byte("invalid json content"), 0644)
 
-		logOutput := captureLogOutput(t, func() {
-			rs.processListFile(fullListPath, formatter)
-		})
+		rs.processListFile(fullListPath, formatter)
 
-		if !strings.Contains(logOutput, "Error unmarshaling file") {
-			t.Errorf("Expected 'Error unmarshaling file' log message, got: %s", logOutput)
+		if !logsContainMsg(logs.All(), "error unmarshaling file") {
+			t.Errorf("Expected 'error unmarshaling file' log message, got %d entries", logs.Len())
 		}
 	})
 
 	t.Run("test missing URIs logging", func(t *testing.T) {
-		// Create a file with missing URIs
+		rs, logs := newRenewalServiceWithObserver(cfg, stor)
 		listDir := filepath.Join(statusListDir, "test_issuer", "token_status_list")
 		os.MkdirAll(listDir, 0755)
 		fullListPath := filepath.Join(listDir, "full_list.json")
 
-		statusData := &models.StatusListData{
-			StatusListURI:     "", // Empty URI
-			IdentifierListURI: "",
-		}
+		statusData := &models.StatusListData{StatusListURI: "", IdentifierListURI: ""}
 		jsonData, _ := json.Marshal(statusData)
 		os.WriteFile(fullListPath, jsonData, 0644)
 
-		logOutput := captureLogOutput(t, func() {
-			rs.processListFile(fullListPath, formatter)
-		})
+		rs.processListFile(fullListPath, formatter)
 
-		if !strings.Contains(logOutput, "URIs don't exist in file") {
-			t.Errorf("Expected 'URIs don't exist in file' log message, got: %s", logOutput)
+		if !logsContainMsg(logs.All(), "URIs missing in file") {
+			t.Errorf("Expected 'URIs missing in file' log message, got %d entries", logs.Len())
 		}
 	})
 
 	t.Run("test invalid expiry date logging", func(t *testing.T) {
-		// Create a file with invalid expiry date
+		rs, logs := newRenewalServiceWithObserver(cfg, stor)
 		listDir := filepath.Join(statusListDir, "test_issuer", "token_status_list")
 		os.MkdirAll(listDir, 0755)
 		fullListPath := filepath.Join(listDir, "full_list.json")
@@ -512,22 +502,20 @@ func TestErrorLogging(t *testing.T) {
 		jsonData, _ := json.Marshal(statusData)
 		os.WriteFile(fullListPath, jsonData, 0644)
 
-		logOutput := captureLogOutput(t, func() {
-			rs.processListFile(fullListPath, formatter)
-		})
+		rs.processListFile(fullListPath, formatter)
 
-		if !strings.Contains(logOutput, "Error parsing expiry date") {
-			t.Errorf("Expected 'Error parsing expiry date' log message, got: %s", logOutput)
+		if !logsContainMsg(logs.All(), "error parsing expiry date") {
+			t.Errorf("Expected 'error parsing expiry date' log message, got %d entries", logs.Len())
 		}
 	})
 
 	t.Run("test expired directory removal logging", func(t *testing.T) {
-		// Create an expired file
+		rs, logs := newRenewalServiceWithObserver(cfg, stor)
 		listDir := filepath.Join(statusListDir, "test_issuer", "token_status_list")
 		os.MkdirAll(listDir, 0755)
 		fullListPath := filepath.Join(listDir, "full_list.json")
 
-		expiredDate := time.Now().AddDate(-1, 0, 0).Format("2006-01-02") // 1 year ago
+		expiredDate := time.Now().AddDate(-1, 0, 0).Format("2006-01-02")
 		statusData := &models.StatusListData{
 			TokenStatusList:   models.NewIssuerStatusList(2, 100, "sequential"),
 			Expires:           &expiredDate,
@@ -537,17 +525,15 @@ func TestErrorLogging(t *testing.T) {
 		jsonData, _ := json.Marshal(statusData)
 		os.WriteFile(fullListPath, jsonData, 0644)
 
-		logOutput := captureLogOutput(t, func() {
-			rs.processListFile(fullListPath, formatter)
-		})
+		rs.processListFile(fullListPath, formatter)
 
-		if !strings.Contains(logOutput, "is expired, skipping renewal") {
-			t.Errorf("Expected expired skipping log message, got: %s", logOutput)
+		if !logsContainMsg(logs.All(), "list is expired, skipping renewal") {
+			t.Errorf("Expected 'list is expired, skipping renewal' log message, got %d entries", logs.Len())
 		}
 	})
 
 	t.Run("test relative path error logging", func(t *testing.T) {
-		// Create a file outside the base directory to cause relative path error
+		rs, logs := newRenewalServiceWithObserver(cfg, stor)
 		outsideDir := filepath.Join(tempDir, "outside")
 		os.MkdirAll(outsideDir, 0755)
 		fullListPath := filepath.Join(outsideDir, "full_list.json")
@@ -556,22 +542,13 @@ func TestErrorLogging(t *testing.T) {
 		jsonData, _ := json.Marshal(statusData)
 		os.WriteFile(fullListPath, jsonData, 0644)
 
-		logOutput := captureLogOutput(t, func() {
-			rs.processListFile(fullListPath, formatter)
-		})
+		rs.processListFile(fullListPath, formatter)
 
-		// This might not always trigger relative path error, so we check for any logged output
-		// or we modify to be more lenient
-		if strings.Contains(logOutput, "Error getting relative path") {
-			t.Logf("Successfully captured relative path error: %s", logOutput)
-		} else {
-			t.Logf("Relative path error not triggered, log output: %s", logOutput)
-			// This is acceptable as the error might not occur depending on the filesystem
-		}
+		t.Logf("Log entries: %d", logs.Len())
 	})
 
 	t.Run("test backup directory creation error logging", func(t *testing.T) {
-		// Create a valid file but make backup directory inaccessible
+		rs, _ := newRenewalServiceWithObserver(cfg, stor)
 		listDir := filepath.Join(statusListDir, "test_issuer", "token_status_list")
 		os.MkdirAll(listDir, 0755)
 		fullListPath := filepath.Join(listDir, "full_list.json")
@@ -580,22 +557,10 @@ func TestErrorLogging(t *testing.T) {
 		jsonData, _ := json.Marshal(statusData)
 		os.WriteFile(fullListPath, jsonData, 0644)
 
-		// Make backup directory read-only to cause mkdir error
 		os.Chmod(cfg.BackupDir, 0444)
-		defer os.Chmod(cfg.BackupDir, 0755) // Reset for cleanup
+		defer os.Chmod(cfg.BackupDir, 0755)
 
-		logOutput := captureLogOutput(t, func() {
-			rs.processListFile(fullListPath, formatter)
-		})
-
-		// On Windows, this might not trigger the backup directory error,
-		// but we should see some processing happen
-		if strings.Contains(logOutput, "Error creating backup directory") {
-			t.Logf("Successfully captured backup directory error: %s", logOutput)
-		} else {
-			t.Logf("Backup directory error not triggered, but processing occurred: %s", logOutput)
-			// This is acceptable as Windows file permissions work differently
-		}
+		rs.processListFile(fullListPath, formatter)
 	})
 }
 
@@ -604,93 +569,59 @@ func TestRenewalMethodErrorLogging(t *testing.T) {
 	tempDir, statusListDir, cfg, stor := setupTestEnvironment(t)
 	defer os.RemoveAll(tempDir)
 
-	rs := NewRenewalService(cfg, stor)
 	statusListData := createTestStatusListData(false)
 	formatter := services.NewStatusListFormatter(cfg)
 
 	t.Run("test renewTokenStatusList JWT generation error logging", func(t *testing.T) {
+		rs, logs := newRenewalServiceWithObserver(cfg, stor)
 		dirPath := filepath.Join(statusListDir, "test_issuer", "token_status_list")
 		os.MkdirAll(dirPath, 0755)
-		copyDir := filepath.Join(cfg.BackupDir, "test", "test_issuer", "token_status_list")
-		os.MkdirAll(copyDir, 0755)
 
-		// Create existing files
 		os.WriteFile(filepath.Join(dirPath, "token_status_list.jwt"), []byte("old-jwt"), 0644)
 		os.WriteFile(filepath.Join(dirPath, "token_status_list.cwt"), []byte("old-cwt"), 0644)
 		os.WriteFile(filepath.Join(dirPath, "full_list.json"), []byte("old-json"), 0644)
 
-		logOutput := captureLogOutput(t, func() {
-			rs.renewTokenStatusList(dirPath, statusListData, formatter)
-		})
+		rs.renewTokenStatusList(dirPath, statusListData, formatter)
 
-		// The formatter will likely fail due to missing keys/certs, so we should see error logs
-		if !strings.Contains(logOutput, "Failed to generate JWT") && !strings.Contains(logOutput, "Failed to generate CWT") {
-			t.Logf("Log output: %s", logOutput)
-			// Note: This might not always generate errors if the formatter handles missing certs gracefully
-		}
+		t.Logf("Log entries: %d", logs.Len())
 	})
 
 	t.Run("test renewTokenStatusList file write error logging", func(t *testing.T) {
-		dirPath := filepath.Join(statusListDir, "test_issuer", "token_status_list")
+		rs, logs := newRenewalServiceWithObserver(cfg, stor)
+		dirPath := filepath.Join(statusListDir, "test_issuer2", "token_status_list")
 		os.MkdirAll(dirPath, 0755)
-		copyDir := filepath.Join(cfg.BackupDir, "test", "test_issuer", "token_status_list")
-		os.MkdirAll(copyDir, 0755)
 
-		// Create existing files
 		os.WriteFile(filepath.Join(dirPath, "token_status_list.jwt"), []byte("old-jwt"), 0644)
 		os.WriteFile(filepath.Join(dirPath, "token_status_list.cwt"), []byte("old-cwt"), 0644)
-		os.WriteFile(filepath.Join(dirPath, "full_list.json"), []byte("old-json"), 0644)
 
-		// Make directory read-only to cause write errors
 		os.Chmod(dirPath, 0444)
-		defer os.Chmod(dirPath, 0755) // Reset for cleanup
+		defer os.Chmod(dirPath, 0755)
 
-		logOutput := captureLogOutput(t, func() {
-			rs.renewTokenStatusList(dirPath, statusListData, formatter)
-		})
+		rs.renewTokenStatusList(dirPath, statusListData, formatter)
 
-		// Should see file write errors
-		if !strings.Contains(logOutput, "Failed to write") {
-			t.Logf("Log output: %s", logOutput)
-			// Note: On Windows, file permission behavior might be different
-		}
+		t.Logf("Log entries: %d", logs.Len())
 	})
 
 	t.Run("test renewIdentifierList error logging", func(t *testing.T) {
+		rs, logs := newRenewalServiceWithObserver(cfg, stor)
 		dirPath := filepath.Join(statusListDir, "test_issuer", "identifier_list")
 		os.MkdirAll(dirPath, 0755)
-		copyDir := filepath.Join(cfg.BackupDir, "test", "test_issuer", "identifier_list")
-		os.MkdirAll(copyDir, 0755)
 
-		// Create existing files
 		os.WriteFile(filepath.Join(dirPath, "identifier_list.jwt"), []byte("old-jwt"), 0644)
 		os.WriteFile(filepath.Join(dirPath, "identifier_list.cwt"), []byte("old-cwt"), 0644)
-		os.WriteFile(filepath.Join(dirPath, "full_list.json"), []byte("old-json"), 0644)
 
-		// Make directory read-only to cause write errors
 		os.Chmod(dirPath, 0444)
-		defer os.Chmod(dirPath, 0755) // Reset for cleanup
+		defer os.Chmod(dirPath, 0755)
 
-		logOutput := captureLogOutput(t, func() {
-			rs.renewIdentifierList(dirPath, statusListData, formatter)
-		})
+		rs.renewIdentifierList(dirPath, statusListData, formatter)
 
-		// Should see file write errors or generation errors
-		t.Logf("Identifier list log output: %s", logOutput)
-		// Note: The exact error messages depend on the formatter implementation
+		t.Logf("Log entries: %d", logs.Len())
 	})
 }
 
 // TestRenewListsErrorLogging tests top-level error logging
 func TestRenewListsErrorLogging(t *testing.T) {
 	t.Run("test filepath.Walk error logging", func(t *testing.T) {
-		// Use a non-existent directory to trigger walk error
-		tempDir, err := os.MkdirTemp("", "renewal_error_logging_test")
-		if err != nil {
-			t.Fatalf("Failed to create temp directory: %v", err)
-		}
-		defer os.RemoveAll(tempDir)
-
 		cfg := &config.Config{
 			StatusListDir: "/path/that/does/not/exist",
 			BackupDir:     "/another/path/that/does/not/exist",
@@ -701,19 +632,15 @@ func TestRenewListsErrorLogging(t *testing.T) {
 			t.Fatalf("Failed to create storage: %v", err)
 		}
 
-		rs := NewRenewalService(cfg, stor)
+		rs, logs := newRenewalServiceWithObserver(cfg, stor)
+		rs.RenewLists()
 
-		logOutput := captureLogOutput(t, func() {
-			rs.RenewLists()
-		})
-
-		if !strings.Contains(logOutput, "Starting list renewal process") {
-			t.Errorf("Expected 'Starting list renewal process' log message, got: %s", logOutput)
+		if !logsContainMsg(logs.All(), "starting list renewal process") {
+			t.Errorf("Expected 'starting list renewal process' log message, got %d entries", logs.Len())
 		}
 
-		// Should also contain error message for non-existent directory
-		if !strings.Contains(logOutput, "Error listing files") {
-			t.Errorf("Expected 'Error listing files' log message, got: %s", logOutput)
+		if !logsContainMsg(logs.All(), "error listing files") {
+			t.Errorf("Expected 'error listing files' log message, got %d entries", logs.Len())
 		}
 	})
 }
@@ -812,6 +739,7 @@ func TestWriteOrCreateFileNewFile(t *testing.T) {
 	}
 
 	rs := &RenewalService{
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -852,6 +780,7 @@ func TestWriteOrCreateFileVersionConflictRetry(t *testing.T) {
 	}
 
 	rs := &RenewalService{
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -904,6 +833,7 @@ func TestWriteOrCreateFileMaxRetriesExceeded(t *testing.T) {
 	}
 
 	rs := &RenewalService{
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -941,6 +871,7 @@ func TestWriteOrCreateFileFileDeletedDuringOperation(t *testing.T) {
 	}
 
 	rs := &RenewalService{
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -971,6 +902,7 @@ func TestWriteOrCreateFileGetVersionFailsWithNoSuchKey(t *testing.T) {
 	}
 
 	rs := &RenewalService{
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -1015,6 +947,7 @@ func TestWriteOrCreateFileNonVersionMismatchError(t *testing.T) {
 	}
 
 	rs := &RenewalService{
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -1055,6 +988,7 @@ func TestProcessListFileFileNotFound(t *testing.T) {
 	}
 
 	rs := &RenewalService{
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -1084,6 +1018,7 @@ func TestRenewTokenStatusListDirectoryDeletedDuringWrite(t *testing.T) {
 	}
 
 	rs := &RenewalService{
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}
@@ -1115,6 +1050,7 @@ func TestRenewIdentifierListDirectoryDeletedDuringWrite(t *testing.T) {
 	}
 
 	rs := &RenewalService{
+		logger:  zap.NewNop(),
 		config:  cfg,
 		storage: mockStorage,
 	}

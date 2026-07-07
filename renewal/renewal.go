@@ -20,11 +20,12 @@ import (
 	"encoding/json"
 	stdErrors "errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/errors"
@@ -37,48 +38,41 @@ import (
 type RenewalService struct {
 	config  *config.Config
 	storage storage.Storage
+	logger  *zap.Logger
 }
 
 // NewRenewalService creates a new renewal service
-func NewRenewalService(cfg *config.Config, stor storage.Storage) *RenewalService {
+func NewRenewalService(cfg *config.Config, stor storage.Storage, logger *zap.Logger) *RenewalService {
 	return &RenewalService{
 		config:  cfg,
 		storage: stor,
+		logger:  logger,
 	}
 }
 
 // RenewLists renews all status lists that haven't expired
 func (rs *RenewalService) RenewLists() error {
 	hostname, _ := os.Hostname()
-	log.Printf("Starting list renewal process on pod %s", hostname)
+	rs.logger.Info("starting list renewal process", zap.String("pod", hostname))
 
-	// Check if the status list directory exists
-	if _, err := os.Stat(rs.config.StatusListDir); os.IsNotExist(err) {
-		log.Printf("Error listing files: status list directory does not exist: %s", rs.config.StatusListDir)
-		return fmt.Errorf("status list directory does not exist: %s: %w", rs.config.StatusListDir, err)
-	}
-
-	// Create formatter for JWT/CWT generation
 	formatter := services.NewStatusListFormatter(rs.config)
 
-	// Use Storage.List to find all full_list.json files
 	allFiles, err := rs.storage.List("")
 	if err != nil {
-		log.Printf("Error listing files: %v", err)
-		return nil // Handle gracefully, don't fail the entire renewal
+		rs.logger.Error("error listing files", zap.Error(err))
+		return nil
 	}
 
-	// Process only full_list.json files
 	for _, filePath := range allFiles {
 		if filepath.Base(filePath) == "full_list.json" {
 			if err := rs.processListFile(filePath, formatter); err != nil {
-				log.Printf("Error processing file %s: %v", filePath, err)
-				// Continue with other files
+				rs.logger.Error("error processing file", zap.String("file", filePath), zap.Error(err))
 			}
 		}
 	}
 
-	log.Println("List renewal process completed")
+	rs.logger.Info("list renewal process completed")
+
 	return nil
 }
 
@@ -125,7 +119,7 @@ func (rs *RenewalService) loadAndValidateData(relativePath, filePath, dirPath st
 
 	var statusListData models.StatusListData
 	if err := json.Unmarshal(jsonData, &statusListData); err != nil {
-		log.Printf("Error unmarshaling file %s: %v", filePath, err)
+		rs.logger.Error("error unmarshaling file", zap.String("file", filePath), zap.Error(err))
 		return nil, true
 	}
 
@@ -143,19 +137,22 @@ func (rs *RenewalService) loadAndValidateData(relativePath, filePath, dirPath st
 // handleReadError handles storage read errors and returns whether to skip
 func (rs *RenewalService) handleReadError(err error, filePath string) bool {
 	if stdErrors.Is(err, errors.ErrNotFound) {
-		log.Printf("File %s no longer exists (may have been cleaned up), skipping", filePath)
+		rs.logger.Debug("file no longer exists, skipping", zap.String("file", filePath))
 		return true
 	}
-	log.Printf("Error reading file %s: %v", filePath, err)
+
+	rs.logger.Error("error reading file", zap.String("file", filePath), zap.Error(err))
+
 	return true
 }
 
 // hasRequiredURIs checks if the status list has required URIs
 func (rs *RenewalService) hasRequiredURIs(statusListData *models.StatusListData, filePath string) bool {
 	if statusListData.StatusListURI == "" || statusListData.IdentifierListURI == "" {
-		log.Printf("URIs don't exist in file: %s", filePath)
+		rs.logger.Warn("URIs missing in file", zap.String("file", filePath))
 		return false
 	}
+
 	return true
 }
 
@@ -167,14 +164,12 @@ func (rs *RenewalService) isListExpired(statusListData *models.StatusListData, d
 
 	expiresDate, err := time.Parse("2006-01-02", *statusListData.Expires)
 	if err != nil {
-		log.Printf("Error parsing expiry date in file %s: %v", dirPath, err)
+		rs.logger.Error("error parsing expiry date", zap.String("dir", dirPath), zap.Error(err))
 		return true
 	}
 
 	if expiresDate.Before(time.Now()) {
-		log.Printf("List %s is expired, skipping renewal", dirPath)
-		// Note: Expired lists are cleaned up by the separate cleanup service
-		// which runs on a configurable schedule (default: daily at 2:00 AM)
+		rs.logger.Info("list is expired, skipping renewal", zap.String("dir", dirPath))
 		return true
 	}
 
@@ -183,17 +178,18 @@ func (rs *RenewalService) isListExpired(statusListData *models.StatusListData, d
 
 // renewTokenStatusList renews token status list files
 func (rs *RenewalService) renewTokenStatusList(dirPath string, statusListData *models.StatusListData, formatter *services.StatusListFormatter) error {
-	// Note: Backup functionality removed as it requires filesystem-specific operations
-	// In production, backups should be handled at the infrastructure level (S3 versioning, etc.)
+	expiryDate := ""
+	if statusListData.Expires != nil {
+		expiryDate = *statusListData.Expires
+	}
 
-	// Regenerate JWT
-	rs.generateAndWrite(dirPath, "token_status_list.jwt", func() (string, error) {
-		return formatter.GenerateJWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI)
+	rs.generateAndWrite(dirPath, "token_status_list.jwt", func() ([]byte, error) {
+		s, err := formatter.GenerateJWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI, expiryDate)
+		return []byte(s), err
 	}, "JWT")
 
-	// Regenerate CWT
-	rs.generateAndWrite(dirPath, "token_status_list.cwt", func() (string, error) {
-		return formatter.GenerateCWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI)
+	rs.generateAndWrite(dirPath, "token_status_list.cwt", func() ([]byte, error) {
+		return formatter.GenerateCWT(statusListData.TokenStatusList, statusListData.Country, statusListData.StatusListURI, expiryDate)
 	}, "CWT")
 
 	return nil
@@ -201,42 +197,42 @@ func (rs *RenewalService) renewTokenStatusList(dirPath string, statusListData *m
 
 // renewIdentifierList renews identifier list files
 func (rs *RenewalService) renewIdentifierList(dirPath string, statusListData *models.StatusListData, formatter *services.StatusListFormatter) error {
-	// Note: Backup functionality removed as it requires filesystem-specific operations
-	// In production, backups should be handled at the infrastructure level (S3 versioning, etc.)
+	expiryDate := ""
+	if statusListData.Expires != nil {
+		expiryDate = *statusListData.Expires
+	}
 
-	// Regenerate JWT
-	rs.generateAndWrite(dirPath, "identifier_list.jwt", func() (string, error) {
-		return formatter.GenerateIdentifierJWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI)
+	rs.generateAndWrite(dirPath, "identifier_list.jwt", func() ([]byte, error) {
+		s, err := formatter.GenerateIdentifierJWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI, expiryDate)
+		return []byte(s), err
 	}, "identifier JWT")
 
-	// Regenerate CWT
-	rs.generateAndWrite(dirPath, "identifier_list.cwt", func() (string, error) {
-		return formatter.GenerateIdentifierCWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI)
+	rs.generateAndWrite(dirPath, "identifier_list.cwt", func() ([]byte, error) {
+		return formatter.GenerateIdentifierCWT(statusListData.IdentifierList, statusListData.Country, statusListData.IdentifierListURI, expiryDate)
 	}, "identifier CWT")
 
 	return nil
 }
 
 // generateAndWrite handles the pattern of generating content and writing it to a file
-// with appropriate error handling and logging
 func (rs *RenewalService) generateAndWrite(
 	dirPath string,
 	filename string,
-	generateFunc func() (string, error),
+	generateFunc func() ([]byte, error),
 	description string,
 ) {
 	content, err := generateFunc()
 	if err != nil {
-		log.Printf("Failed to generate %s for %s: %v", description, dirPath, err)
+		rs.logger.Error("failed to generate token", zap.String("type", description), zap.String("dir", dirPath), zap.Error(err))
 		return
 	}
 
 	filePath := filepath.Join(dirPath, filename)
-	if err := rs.writeOrCreateFile(filePath, []byte(content)); err != nil {
+	if err := rs.writeOrCreateFile(filePath, content); err != nil {
 		if stdErrors.Is(err, errors.ErrNotFound) {
-			log.Printf("Directory %s no longer exists (cleaned up), skipping %s write", dirPath, description)
+			rs.logger.Debug("directory no longer exists, skipping write", zap.String("dir", dirPath), zap.String("type", description))
 		} else {
-			log.Printf("Failed to write %s file %s: %v", description, filePath, err)
+			rs.logger.Error("failed to write file", zap.String("type", description), zap.String("file", filePath), zap.Error(err))
 		}
 	}
 }
@@ -281,6 +277,7 @@ func (rs *RenewalService) performWriteAttempt(path string, content []byte, attem
 	if err != nil {
 		return writeAttemptResult{shouldReturn: true, err: err}
 	}
+
 	if !exists {
 		return writeAttemptResult{shouldReturn: true, err: nil}
 	}
@@ -290,14 +287,16 @@ func (rs *RenewalService) performWriteAttempt(path string, content []byte, attem
 		if stdErrors.Is(err, errors.ErrNotFound) {
 			return writeAttemptResult{shouldReturn: true, err: nil}
 		}
+
 		return writeAttemptResult{shouldReturn: true, err: err}
 	}
 
 	err = rs.attemptWrite(path, content, currentVersion)
 	if err == nil {
 		if attempt > 1 {
-			log.Printf("Successfully wrote %s after %d attempts", path, attempt)
+			rs.logger.Debug("successfully wrote file after retries", zap.String("file", path), zap.Int("attempts", attempt))
 		}
+
 		return writeAttemptResult{shouldReturn: true, err: nil}
 	}
 
@@ -317,7 +316,7 @@ func (rs *RenewalService) verifyFileExists(path string) (bool, error) {
 	}
 
 	if !exists {
-		log.Printf("File %s no longer exists (may have been cleaned up), skipping write", path)
+		rs.logger.Debug("file no longer exists, skipping write", zap.String("file", path))
 		return false, nil
 	}
 
@@ -330,11 +329,13 @@ func (rs *RenewalService) getCurrentVersion(path string) (int, error) {
 	currentVersion, err := rs.storage.GetVersion(path)
 	if err != nil {
 		if stdErrors.Is(err, errors.ErrNotFound) {
-			log.Printf("File %s was deleted during operation, skipping write", path)
+			rs.logger.Debug("file deleted during operation, skipping write", zap.String("file", path))
 			return 0, errors.ErrNotFound
 		}
+
 		return 0, fmt.Errorf("failed to get current version: %w", err)
 	}
+
 	return currentVersion, nil
 }
 
@@ -344,7 +345,6 @@ func (rs *RenewalService) attemptWrite(path string, content []byte, currentVersi
 }
 
 // handleWriteError determines if write should retry or fail
-// Returns (shouldRetry, error) - if shouldRetry is false, the error should be returned to caller
 func (rs *RenewalService) handleWriteError(err error, path string, attempt, maxRetries int) (bool, error) {
 	if !stdErrors.Is(err, errors.ErrVersionMismatch) {
 		return false, err
@@ -354,9 +354,10 @@ func (rs *RenewalService) handleWriteError(err error, path string, attempt, maxR
 		return false, fmt.Errorf("failed after %d attempts: %w", maxRetries, err)
 	}
 
-	log.Printf("Version conflict on %s (attempt %d/%d), retrying...", path, attempt, maxRetries)
-	time.Sleep(time.Millisecond * 100 * time.Duration(attempt)) // Exponential backoff
-	return true, nil                                            // Signal to continue retrying
+	rs.logger.Debug("version conflict, retrying", zap.String("file", path), zap.Int("attempt", attempt), zap.Int("maxRetries", maxRetries))
+	time.Sleep(time.Millisecond * 100 * time.Duration(attempt))
+
+	return true, nil
 }
 
 // copyFile is no longer used with storage abstraction
@@ -369,24 +370,21 @@ func (rs *RenewalService) dailyRenewal() {
 		next := nextRun(now, rs.config.RenewalHour, rs.config.RenewalMinute)
 		delay := time.Until(next)
 
-		log.Printf("Next status list renewal scheduled in %02dh:%02dm:%02ds", int(delay.Hours()), int(delay.Minutes())%60, int(delay.Seconds())%60)
+		rs.logger.Debug("next renewal scheduled", zap.Duration("in", delay))
 
 		time.Sleep(delay)
 
-		log.Println("Renewing Revocation Lists")
+		rs.logger.Info("renewing status lists")
 
 		if err := rs.RenewLists(); err != nil {
-			log.Printf("Error during renewal: %v", err)
+			rs.logger.Error("error during renewal", zap.Error(err))
 		}
 	}
 }
 
 // nextRun calculates the next execution time based on configured hour and minute
 func nextRun(now time.Time, hour, minute int) time.Time {
-	// Create time for today at the configured hour:minute
 	today := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
-
-	// If the time has already passed today, schedule for tomorrow
 	if now.After(today) || now.Equal(today) {
 		return today.Add(24 * time.Hour)
 	}
@@ -395,14 +393,14 @@ func nextRun(now time.Time, hour, minute int) time.Time {
 }
 
 // StartRenewalThread starts the renewal thread as a global function
-func StartRenewalThread(cfg *config.Config, stor storage.Storage) {
+func StartRenewalThread(cfg *config.Config, stor storage.Storage, logger *zap.Logger) {
 	if !cfg.RenewalEnabled {
-		log.Println("Status list renewal disabled via configuration")
+		logger.Info("status list renewal disabled via configuration")
 		return
 	}
 
 	go func() {
-		renewalService := NewRenewalService(cfg, stor)
+		renewalService := NewRenewalService(cfg, stor, logger)
 		renewalService.dailyRenewal()
 	}()
 }

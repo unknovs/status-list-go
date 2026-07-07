@@ -1,17 +1,33 @@
+/*
+Copyright (c) Gatis Beikerts
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package cleanup
 
 import (
 	"encoding/json"
 	stdErrors "errors"
 	"fmt"
-	"log"
 	"os"
 	"path"
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/unknovs/status-list-go/config"
-	"github.com/unknovs/status-list-go/debuglog"
 	"github.com/unknovs/status-list-go/errors"
 	"github.com/unknovs/status-list-go/models"
 	"github.com/unknovs/status-list-go/services/storage"
@@ -25,25 +41,26 @@ const (
 type Service struct {
 	cfg     *config.Config
 	storage storage.Storage
+	logger  *zap.Logger
 }
 
 // NewService creates a cleanup service instance.
-func NewService(cfg *config.Config, stor storage.Storage) *Service {
-	return &Service{cfg: cfg, storage: stor}
+func NewService(cfg *config.Config, stor storage.Storage, logger *zap.Logger) *Service {
+	return &Service{cfg: cfg, storage: stor, logger: logger}
 }
 
 // RunOnce executes the cleanup workflow immediately.
 func (s *Service) RunOnce() {
 	hostname, _ := os.Hostname()
-	debuglog.Printf("Cleanup starting on pod %s", hostname)
+	s.logger.Debug("cleanup starting", zap.String("pod", hostname))
 
 	count, err := s.cleanupExpiredLists()
 	if err != nil {
-		log.Printf("Status list cleanup finished with errors on pod %s; removed %d expired lists: %v", hostname, count, err)
+		s.logger.Error("status list cleanup finished with errors", zap.String("pod", hostname), zap.Int("removed", count), zap.Error(err))
 		return
 	}
 
-	log.Printf("Status list cleanup completed on pod %s; %d expired lists deleted", hostname, count)
+	s.logger.Info("status list cleanup completed", zap.String("pod", hostname), zap.Int("removed", count))
 }
 
 // Start launches the background scheduler that performs cleanup daily at the configured time.
@@ -52,13 +69,13 @@ func (s *Service) Start() {
 }
 
 // StartCleanupWorker creates and starts the cleanup worker if the feature is enabled.
-func StartCleanupWorker(cfg *config.Config, stor storage.Storage) {
+func StartCleanupWorker(cfg *config.Config, stor storage.Storage, logger *zap.Logger) {
 	if !cfg.CleanupEnabled {
-		log.Println("Status list cleanup disabled via configuration")
+		logger.Info("status list cleanup disabled via configuration")
 		return
 	}
 
-	service := NewService(cfg, stor)
+	service := NewService(cfg, stor, logger)
 	service.RunOnce()
 	service.Start()
 }
@@ -69,7 +86,7 @@ func (s *Service) schedule() {
 		next := nextRun(now, s.cfg.CleanupHour, s.cfg.CleanupMinute)
 		delay := time.Until(next)
 
-		log.Printf("Next status list cleanup scheduled in %02dh:%02dm:%02ds", int(delay.Hours()), int(delay.Minutes())%60, int(delay.Seconds())%60)
+		s.logger.Debug("next cleanup scheduled", zap.Duration("in", delay))
 
 		time.Sleep(delay)
 		s.RunOnce()
@@ -83,7 +100,9 @@ func (s *Service) cleanupExpiredLists() (int, error) {
 	}
 
 	now := time.Now().UTC()
+
 	var errs []error
+
 	deleted := 0
 
 	for _, filePath := range paths {
@@ -93,12 +112,13 @@ func (s *Service) cleanupExpiredLists() (int, error) {
 
 		statusList, loadErr := s.loadStatusList(filePath)
 		if loadErr != nil {
-			// Another pod may have already deleted this file ā€” treat as non-error.
 			if stdErrors.Is(loadErr, errors.ErrNotFound) {
-				debuglog.Printf("Cleanup: %s already removed (concurrent cleanup?), skipping", filePath)
+				s.logger.Debug("file already removed (concurrent cleanup?), skipping", zap.String("file", filePath))
 				continue
 			}
+
 			errs = append(errs, loadErr)
+
 			continue
 		}
 
@@ -113,7 +133,7 @@ func (s *Service) cleanupExpiredLists() (int, error) {
 		}
 
 		dirPath := path.Dir(filePath)
-		log.Printf("Removing expired status list at %s (expiry %s)", dirPath, valueOrUnknown(statusList.Expires))
+		s.logger.Info("removing expired status list", zap.String("dir", dirPath), zap.String("expiry", valueOrUnknown(statusList.Expires)))
 
 		if err := s.storage.DeleteTree(dirPath); err != nil {
 			errs = append(errs, fmt.Errorf("delete token list %s: %w", dirPath, err))
@@ -158,7 +178,13 @@ func hasExpired(statusList *models.StatusListData, now time.Time) (bool, error) 
 		return false, fmt.Errorf("parse expiry %q: %w", *statusList.Expires, err)
 	}
 
-	return expiresAt.Before(now), nil
+	// The expiry date is the last valid day (inclusive), matching validateExpiryDate in
+	// the handler. Parsing yields 00:00:00 UTC of that day, so the list is only expired
+	// once now is past the END of the day; advance to the start of the following day
+	// before comparing to avoid deleting lists a full day early.
+	expiresAt = expiresAt.Add(24 * time.Hour)
+
+	return !now.Before(expiresAt), nil
 }
 
 func (s *Service) deleteIdentifierDir(tokenDir string) error {
@@ -178,6 +204,7 @@ func valueOrUnknown(value *string) string {
 	if value == nil {
 		return "unknown"
 	}
+
 	return *value
 }
 
@@ -186,6 +213,6 @@ func nextRun(now time.Time, hour, minute int) time.Time {
 	if !next.After(now) {
 		next = next.Add(24 * time.Hour)
 	}
+
 	return next
 }
-

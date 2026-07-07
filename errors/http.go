@@ -132,6 +132,7 @@ func GetErrorMessage(code ErrorCode) string {
 	if message, exists := errorMessages[code]; exists {
 		return message
 	}
+
 	return errorMessages[ErrInternalServer] // Fallback
 }
 
@@ -147,7 +148,7 @@ func WriteError(w http.ResponseWriter, statusCode int, errorCode ErrorCode) {
 		},
 	}
 
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // WriteCustomError writes a standardized error response with a custom message
@@ -162,5 +163,5 @@ func WriteCustomError(w http.ResponseWriter, statusCode int, errorCode ErrorCode
 		},
 	}
 
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }

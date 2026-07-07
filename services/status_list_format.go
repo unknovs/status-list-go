@@ -21,7 +21,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -30,6 +29,7 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+	statuslistspec "github.com/gmb-eudi/go-statuslist/spec"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/unknovs/status-list-go/config"
 	"github.com/unknovs/status-list-go/models"
@@ -48,29 +48,14 @@ const (
 	ErrSignCWTFormat             = "failed to sign CWT: %v"
 )
 
-// CWTClaims represents the CBOR Web Token claims for status list
-type CWTClaims struct {
-	Issuer     string                 `cbor:"1,keyasint,omitempty"` // iss
-	Subject    string                 `cbor:"2,keyasint,omitempty"` // sub
-	Audience   string                 `cbor:"3,keyasint,omitempty"` // aud
-	Expiration int64                  `cbor:"4,keyasint,omitempty"` // exp
-	NotBefore  int64                  `cbor:"5,keyasint,omitempty"` // nbf
-	IssuedAt   int64                  `cbor:"6,keyasint,omitempty"` // iat
-	CWTID      []byte                 `cbor:"7,keyasint,omitempty"` // cti
-	StatusList map[string]interface{} `cbor:"65534,keyasint"`       // status_list claim
-}
 type JWTClaims struct {
-	Subject    string                 `json:"sub"`
-	IssuedAt   int64                  `json:"iat"`
 	StatusList map[string]interface{} `json:"status_list"`
+	TTL        int64                  `json:"ttl"`
 	jwt.RegisteredClaims
 }
 
 // IdentifierJWTClaims represents the JWT claims for identifier list
 type IdentifierJWTClaims struct {
-	Issuer         string         `json:"iss"`
-	Subject        string         `json:"sub"`
-	IssuedAt       int64          `json:"iat"`
 	IdentifierList map[string]int `json:"identifier_list"`
 	jwt.RegisteredClaims
 }
@@ -86,7 +71,7 @@ func NewStatusListFormatter(cfg *config.Config) *StatusListFormatter {
 }
 
 // GenerateJWT creates a JWT for the token status list
-func (f *StatusListFormatter) GenerateJWT(tokenStatusList *models.IssuerStatusList, country, listURL string) (string, error) {
+func (f *StatusListFormatter) GenerateJWT(tokenStatusList *models.IssuerStatusList, country, listURL, expiryDate string) (string, error) {
 	// Validate country matches configuration
 	if !f.config.ValidateCountry(country) {
 		return "", fmt.Errorf(ErrCountryNotSupportedFormat, country, f.config.CountryCode)
@@ -108,18 +93,29 @@ func (f *StatusListFormatter) GenerateJWT(tokenStatusList *models.IssuerStatusLi
 	}
 
 	// Create JWT claims
+	expiry, err := time.Parse("2006-01-02", expiryDate)
+	if err != nil {
+		return "", fmt.Errorf("invalid expiry date: %w", err)
+	}
+
 	claims := JWTClaims{
-		Subject:  listURL,
-		IssuedAt: time.Now().Unix(),
 		StatusList: map[string]interface{}{
 			"bits": 1,
 			"lst":  base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(tokenStatusList.StatusList.Compressed()),
+		},
+		// ttl: seconds a consumer may cache this token before re-fetching, matching
+		// GenerateCWT's ttl (65534) convention so JWT and CWT paths stay consistent.
+		TTL: 3600,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   listURL,
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(expiry),
 		},
 	}
 
 	// Create token with custom headers
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
-	token.Header["typ"] = "statuslist+jwt"
+	token.Header["typ"] = statuslistspec.MediaStatusListJWT
 	token.Header["x5c"] = []string{base64.StdEncoding.EncodeToString(cert.Raw)}
 
 	// Sign the token
@@ -132,132 +128,136 @@ func (f *StatusListFormatter) GenerateJWT(tokenStatusList *models.IssuerStatusLi
 }
 
 // GenerateCWT creates a CWT for the token status list
-func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusList, country, listURL string) (string, error) {
+func (f *StatusListFormatter) GenerateCWT(tokenStatusList *models.IssuerStatusList, country, listURL, expiryDate string) ([]byte, error) {
 	// Get certificate paths
 	privKeyPath, certPath := f.config.GetCertificatePaths()
 
 	// Load private key
 	privateKey, err := f.loadPrivateKey(privKeyPath)
 	if err != nil {
-		return "", fmt.Errorf(ErrLoadPrivateKeyFormat, err)
+		return nil, fmt.Errorf(ErrLoadPrivateKeyFormat, err)
 	}
 
 	// Load certificate
 	cert, err := f.loadCertificate(certPath)
 	if err != nil {
-		return "", fmt.Errorf(ErrLoadCertificateFormat, err)
+		return nil, fmt.Errorf(ErrLoadCertificateFormat, err)
 	}
 
-	// Create CWT claims using numeric keys as per RFC 8392
 	now := time.Now()
 
-	// Safely handle ServiceURL
 	issuer := f.config.ServiceURL
 	if issuer == "" {
-		return "", ErrServiceURLEmpty
+		return nil, ErrServiceURLEmpty
 	}
+
 	issuer = strings.TrimSuffix(issuer, "/")
 
-	// Use raw map with integer keys for proper CWT format
+	expiry, err := time.Parse("2006-01-02", expiryDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid expiry date: %w", err)
+	}
+
+	// draft-ietf-oauth-status-list-12 §5.2: status_list=65533 (CBOR map with a raw
+	// byte-string lst, NOT base64), ttl=65534. iss(1) stays as a bare claim key
+	// (not in scope of the spec package, since there is no spec.ClaimIss); sub(2)/
+	// exp(4)/iat(6) use the spec constants as a drift guard against the 2/4/6
+	// literals used elsewhere.
 	claims := map[interface{}]interface{}{
-		1: issuer,     // iss (issuer) - RFC 8392 claim 1
-		2: listURL,    // sub (subject) - RFC 8392 claim 2
-		6: now.Unix(), // iat (issued at) - RFC 8392 claim 6
-		65534: map[string]interface{}{ // status_list claim - draft-ietf-oauth-status-list-02
+		1:                       issuer,        // iss
+		statuslistspec.ClaimSub: listURL,       // 2  sub
+		statuslistspec.ClaimExp: expiry.Unix(), // 4  exp
+		statuslistspec.ClaimIat: now.Unix(),    // 6  iat
+		statuslistspec.ClaimTTL: int64(3600),   // 65534 ttl
+		statuslistspec.ClaimStatusList: map[string]interface{}{ // 65533 status_list
 			"bits": 1,
-			"lst":  base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(tokenStatusList.StatusList.Compressed()),
+			"lst":  tokenStatusList.StatusList.Compressed(), // raw []byte -> CBOR bstr
 		},
 	}
 
-	// Encode claims to CBOR
 	claimsData, err := cbor.Marshal(claims)
 	if err != nil {
-		return "", fmt.Errorf(ErrEncodeCWTFormat, err)
+		return nil, fmt.Errorf(ErrEncodeCWTFormat, err)
 	}
 
-	// Create COSE Sign1 message
-	// Set up headers with proper structure
+	// draft-12: the token-type indicator is COSE protected-header typ (label 16,
+	// RFC 9596), not content type (label 3); x5chain (label 33) is protected.
 	headers := cose.Headers{
 		Protected: cose.ProtectedHeader{
-			cose.HeaderLabelAlgorithm:   cose.AlgorithmES256, // ECDSA using P-256 and SHA-256 (-7)
-			cose.HeaderLabelContentType: "application/statuslist+cwt",
-		},
-		Unprotected: cose.UnprotectedHeader{
-			// Include certificate in x5c header (label 33)
-			33: []interface{}{cert.Raw},
+			cose.HeaderLabelAlgorithm: cose.AlgorithmES256,
+			statuslistspec.HeaderTyp:  statuslistspec.MediaStatusListCWT, // typ(16)
+			33:                        []interface{}{cert.Raw},           // x5chain
 		},
 	}
 
-	// Create COSE signer
 	signer, err := cose.NewSigner(cose.AlgorithmES256, privateKey)
 	if err != nil {
-		return "", fmt.Errorf(ErrSignCWTFormat, err)
+		return nil, fmt.Errorf(ErrSignCWTFormat, err)
 	}
 
-	// Create and sign the COSE Sign1 message
 	msg := &cose.Sign1Message{
 		Headers: headers,
 		Payload: claimsData,
 	}
 
-	// Use crypto/rand.Reader for randomness source and empty external AAD
-	err = msg.Sign(rand.Reader, []byte{}, signer)
-	if err != nil {
-		return "", fmt.Errorf(ErrSignCWTFormat, err)
+	if err = msg.Sign(rand.Reader, []byte{}, signer); err != nil {
+		return nil, fmt.Errorf(ErrSignCWTFormat, err)
 	}
 
-	// Encode to CBOR
 	cwtData, err := cbor.Marshal(msg)
 	if err != nil {
-		return "", fmt.Errorf(ErrEncodeCWTFormat, err)
+		return nil, fmt.Errorf(ErrEncodeCWTFormat, err)
 	}
 
-	// Return hex encoded CWT to match the expected format
-	return hex.EncodeToString(cwtData), nil
+	return cwtData, nil
 }
 
 // GenerateIdentifierJWT creates a JWT for the identifier list
-func (f *StatusListFormatter) GenerateIdentifierJWT(identifierList map[string]int, country, listURL string) (string, error) {
-	// Validate country matches configuration
+func (f *StatusListFormatter) GenerateIdentifierJWT(identifierList map[string]int, country, listURL, expiryDate string) (string, error) {
 	if !f.config.ValidateCountry(country) {
 		return "", fmt.Errorf(ErrCountryNotSupportedFormat, country, f.config.CountryCode)
 	}
 
-	// Get certificate paths
 	privKeyPath, certPath := f.config.GetCertificatePaths()
 
-	// Load private key
 	privateKey, err := f.loadPrivateKey(privKeyPath)
 	if err != nil {
 		return "", fmt.Errorf(ErrLoadPrivateKeyFormat, err)
 	}
 
-	// Load certificate
 	cert, err := f.loadCertificate(certPath)
 	if err != nil {
 		return "", fmt.Errorf(ErrLoadCertificateFormat, err)
 	}
 
-	// Create JWT claims
 	issuer := f.config.ServiceURL
 	if issuer == "" {
 		return "", ErrServiceURLEmpty
 	}
+
 	issuer = strings.TrimSuffix(issuer, "/")
 
-	claims := IdentifierJWTClaims{
-		Issuer:         issuer, // Safely handle ServiceURL
-		Subject:        listURL,
-		IssuedAt:       time.Now().Unix(),
-		IdentifierList: identifierList,
+	expiry, err := time.Parse("2006-01-02", expiryDate)
+	if err != nil {
+		return "", fmt.Errorf("invalid expiry date: %w", err)
 	}
 
-	// Create token with custom headers
+	claims := IdentifierJWTClaims{
+		IdentifierList: identifierList,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    issuer,
+			Subject:   listURL,
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(expiry),
+		},
+	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
-	token.Header["typ"] = "statuslist+jwt" // Use RFC compliant base type
+	// ARL reuses the statuslist+jwt typ pending its own media-type constants
+	// (D-2: ARL wire format out of scope for this phase; behavior unchanged).
+	token.Header["typ"] = statuslistspec.MediaStatusListJWT
 	token.Header["x5c"] = []string{base64.StdEncoding.EncodeToString(cert.Raw)}
 
-	// Sign the token
 	tokenString, err := token.SignedString(privateKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign JWT: %v", err)
@@ -267,94 +267,86 @@ func (f *StatusListFormatter) GenerateIdentifierJWT(identifierList map[string]in
 }
 
 // GenerateIdentifierCWT creates a CWT for the identifier list
-func (f *StatusListFormatter) GenerateIdentifierCWT(identifierList map[string]int, country, listURL string) (string, error) {
-	// Validate country matches configuration
+func (f *StatusListFormatter) GenerateIdentifierCWT(identifierList map[string]int, country, listURL, expiryDate string) ([]byte, error) {
 	if !f.config.ValidateCountry(country) {
-		return "", fmt.Errorf(ErrCountryNotSupportedFormat, country, f.config.CountryCode)
+		return nil, fmt.Errorf(ErrCountryNotSupportedFormat, country, f.config.CountryCode)
 	}
 
-	// Get certificate paths
 	privKeyPath, certPath := f.config.GetCertificatePaths()
 
-	// Load private key
 	privateKey, err := f.loadPrivateKey(privKeyPath)
 	if err != nil {
-		return "", fmt.Errorf(ErrLoadPrivateKeyFormat, err)
+		return nil, fmt.Errorf(ErrLoadPrivateKeyFormat, err)
 	}
 
-	// Load certificate
 	cert, err := f.loadCertificate(certPath)
 	if err != nil {
-		return "", fmt.Errorf(ErrLoadCertificateFormat, err)
+		return nil, fmt.Errorf(ErrLoadCertificateFormat, err)
 	}
 
-	// Create CWT claims for identifier list
-	// RFC-compliant structure using status list claim format
 	now := time.Now()
 
-	// Safely handle ServiceURL
 	issuer := f.config.ServiceURL
 	if issuer == "" {
-		return "", ErrServiceURLEmpty
+		return nil, ErrServiceURLEmpty
 	}
+
 	issuer = strings.TrimSuffix(issuer, "/")
 
+	expiry, err := time.Parse("2006-01-02", expiryDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid expiry date: %w", err)
+	}
+
 	claims := map[interface{}]interface{}{
-		1: issuer,     // iss (issuer) - RFC 8392 claim 1
-		2: listURL,    // sub (subject) - RFC 8392 claim 2
-		6: now.Unix(), // iat (issued at) - RFC 8392 claim 6
-		65534: map[string]interface{}{ // status_list claim - RFC compliant claim number
-			"bits":           1,              // Identifier lists use 1 bit per entry
-			"identifier_map": identifierList, // Custom field for identifier mapping
+		1: issuer,        // iss
+		2: listURL,       // sub
+		4: expiry.Unix(), // exp
+		6: now.Unix(),    // iat
+		65534: map[string]interface{}{
+			"bits":           1,
+			"identifier_map": identifierList,
 		},
 	}
 
-	// Encode claims to CBOR
 	claimsData, err := cbor.Marshal(claims)
 	if err != nil {
-		return "", fmt.Errorf(ErrEncodeCWTFormat, err)
+		return nil, fmt.Errorf(ErrEncodeCWTFormat, err)
 	}
 
-	// Create COSE Sign1 message
-	// Set up headers
 	headers := cose.Headers{
 		Protected: cose.ProtectedHeader{
-			cose.HeaderLabelAlgorithm: cose.AlgorithmES256, // ECDSA using P-256 and SHA-256
-			// Use a more specific content type for identifier lists
-			cose.HeaderLabelContentType: "application/statuslist+cwt", // RFC compliant base type
+			cose.HeaderLabelAlgorithm: cose.AlgorithmES256,
+			// ARL reuses the statuslist+cwt content type pending its own media-type
+			// constants (D-2: ARL wire format out of scope for this phase; behavior
+			// unchanged).
+			cose.HeaderLabelContentType: statuslistspec.MediaStatusListCWT,
 		},
 		Unprotected: cose.UnprotectedHeader{
-			// Include certificate in x5c header (label 33)
 			33: []interface{}{cert.Raw},
 		},
 	}
 
-	// Create COSE signer
 	signer, err := cose.NewSigner(cose.AlgorithmES256, privateKey)
 	if err != nil {
-		return "", fmt.Errorf(ErrSignCWTFormat, err)
+		return nil, fmt.Errorf(ErrSignCWTFormat, err)
 	}
 
-	// Create and sign the COSE Sign1 message
 	msg := &cose.Sign1Message{
 		Headers: headers,
 		Payload: claimsData,
 	}
 
-	// Use crypto/rand.Reader for randomness source and empty external AAD
-	err = msg.Sign(rand.Reader, []byte{}, signer)
-	if err != nil {
-		return "", fmt.Errorf(ErrSignCWTFormat, err)
+	if err = msg.Sign(rand.Reader, []byte{}, signer); err != nil {
+		return nil, fmt.Errorf(ErrSignCWTFormat, err)
 	}
 
-	// Encode to CBOR
 	cwtData, err := cbor.Marshal(msg)
 	if err != nil {
-		return "", fmt.Errorf(ErrEncodeCWTFormat, err)
+		return nil, fmt.Errorf(ErrEncodeCWTFormat, err)
 	}
 
-	// Return hex encoded CWT to match the expected format
-	return hex.EncodeToString(cwtData), nil
+	return cwtData, nil
 }
 
 // loadPrivateKey loads a private key from file
@@ -393,6 +385,7 @@ func (f *StatusListFormatter) loadPrivateKey(keyPath string) (*ecdsa.PrivateKey,
 // findPrivateKeyPEMBlock finds the first private key PEM block in the data
 func (f *StatusListFormatter) findPrivateKeyPEMBlock(keyData []byte) (*pem.Block, error) {
 	var block *pem.Block
+
 	remaining := keyData
 
 	for {
